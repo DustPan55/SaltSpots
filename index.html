@@ -165,6 +165,7 @@
     <div class="mapwrap">
       <div id="map"></div>
       <div class="mapbtns">
+        <button id="btnFind">✨ Find spots</button>
         <button id="btnOyster">🦪 Oyster</button>
         <button id="btnGrass">🌿 Grass</button>
       </div>
@@ -433,8 +434,8 @@ function bestWindows(spot,ctx){
 async function getContext(lat,lng){
   const key=lat.toFixed(3)+','+lng.toFixed(3);
   if(ctxCache[key]&&Date.now()-ctxCache[key]._t<12*6e4)return ctxCache[key];
-  const d0=ymd(new Date()), d2=ymd(new Date(Date.now()+2*864e5));
-  const wxU=`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m,pressure_msl&hourly=wind_speed_10m,pressure_msl&daily=sunrise,sunset&forecast_days=3&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto`;
+  const d0=ymd(new Date()), d2=ymd(new Date(Date.now()+6*864e5));   // 7-day horizon for trip planning
+  const wxU=`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m,pressure_msl&hourly=wind_speed_10m,pressure_msl&daily=sunrise,sunset&forecast_days=7&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto`;
   const marU=`https://marine-api.open-meteo.com/v1/marine?latitude=${lat}&longitude=${lng}&current=wave_height,sea_surface_temperature&length_unit=imperial&timezone=auto`;
   const [tide,wx,mar,wtemp]=await Promise.all([ fetchTide(lat,lng,d0,d2),
     fetch(wxU).then(r=>r.json()).catch(()=>null),
@@ -465,7 +466,7 @@ async function getContext(lat,lng){
 async function fetchWaterTemp(lat,lng){
   try{
     if(!_wtStations)_wtStations=await stationList('watertemp');
-    const st=nearest(_wtStations,lat,lng); if(!st||st.dist>40)return null;
+    const st=nearest(_wtStations,lat,lng); if(!st||st.dist>75)return null; // bay temps are regionally similar
     const u=`https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?station=${st.id}&product=water_temperature&date=latest&units=english&time_zone=lst_ldt&format=json`;
     const j=await fetch(u).then(r=>r.json());
     const v=j?.data?.[0]?.v; return v!=null?Math.round(+v):null;
@@ -609,6 +610,84 @@ async function toggleHabitat(kind){
 }
 document.getElementById('btnOyster').onclick=()=>toggleHabitat('oyster');
 document.getElementById('btnGrass').onclick=()=>toggleHabitat('grass');
+document.getElementById('btnFind').onclick=suggestSpots;
+
+/* ---- Suggested spots: derive candidates from mapped habitat, score, rank ---- */
+let suggestMarkers=[];
+async function suggestSpots(){
+  const btn=document.getElementById('btnFind');
+  if(suggestMarkers.length){clearSuggest();btn.classList.remove('on');return;}
+  const c=map.getCenter(),region=regionFor(c.lat,c.lng);
+  if(!region){toast('Spot finder covers FL & TX for now');return;}
+  if(map.getZoom()<11){toast('Zoom in a bit, then tap Find spots');return;}
+  btn.classList.add('on');toast('Scanning mapped habitat…');
+  const b=map.getBounds(),bbox=`${b.getWest()},${b.getSouth()},${b.getEast()},${b.getNorth()}`;
+  const q=(u,rc)=>fetch(`${u}/query?geometry=${bbox}&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=*&maxAllowableOffset=0.0002&resultRecordCount=${rc}&f=geojson`).then(r=>r.json()).catch(()=>null);
+  let oys,grs,ctx;
+  try{ [oys,grs,ctx]=await Promise.all([ Promise.all(region.oyster.map(u=>q(u,120))), Promise.all(region.grass.map(u=>q(u,120))), getContext(c.lat,c.lng) ]); }
+  catch(e){btn.classList.remove('on');return toast('Could not load habitat');}
+  const defSpecies=region.name==='Texas'?['Redfish','Trout']:['Redfish','Snook'];
+  const cands=[];
+  for(const res of oys)for(const f of (res?.features||[])){const ct=centroid(f);if(ct)cands.push({lat:ct[1],lng:ct[0],structure:'oyster',mult:1.10,why:'On a mapped oyster reef'});}
+  for(const res of grs)for(const f of (res?.features||[])){const ct=centroid(f);if(ct){const den=grassDensity(f);cands.push({lat:ct[1],lng:ct[0],structure:'flat',mult:den==='continuous'?1.12:1.06,why:den==='continuous'?'On a continuous grass flat':'On a grass flat'});}}
+  // grid-dedupe (~450m), prefer oyster, and skip anything near a saved spot
+  const grid={},cell=0.0045;
+  for(const cd of cands){const k=Math.round(cd.lat/cell)+','+Math.round(cd.lng/cell);if(!grid[k]||(cd.structure==='oyster'&&grid[k].structure!=='oyster'))grid[k]=cd;}
+  let list=Object.values(grid).filter(cd=>!spots.some(s=>hav(s.lat,s.lng,cd.lat,cd.lng)<0.25));
+  list.forEach((cd,i)=>{cd.id='sg'+i;cd.species=defSpecies;habCache[cd.id]={mult:cd.mult};cd.score=scoreAt(cd,ctx,new Date()).score;});
+  list.sort((a,b)=>b.score-a.score);
+  const top=list.slice(0,14);
+  clearSuggest();
+  top.forEach(cd=>{const m=L.marker([cd.lat,cd.lng],{icon:suggestIcon(cd.score,cd.structure),zIndexOffset:-50}).addTo(map).on('click',()=>openSuggest(cd,ctx));suggestMarkers.push(m);});
+  toast(top.length?`Found ${top.length} spots — tap a circle`:'No mapped habitat in view to suggest from');
+}
+function clearSuggest(){suggestMarkers.forEach(m=>map.removeLayer(m));suggestMarkers=[];}
+function centroid(f){const g=f.geometry;if(!g)return null;let sx=0,sy=0,n=0;const polys=g.type==='Polygon'?[g.coordinates]:g.type==='MultiPolygon'?g.coordinates:[];for(const poly of polys)for(const c of poly[0]){sx+=c[0];sy+=c[1];n++;}return n?[sx/n,sy/n]:null;}
+function suggestIcon(score,struct){const c=scoreColor(score);return L.divIcon({className:'',iconSize:[30,30],iconAnchor:[15,15],html:`<div style="width:28px;height:28px;border-radius:50%;background:#fff;border:2.5px solid ${c};display:grid;place-items:center;box-shadow:0 1px 4px rgba(0,0,0,.35);font-size:12.5px;font-weight:800;color:${c}">${score}</div>`});}
+function openSuggest(cd,ctx){
+  const bg=document.getElementById('detailBg'),body=document.getElementById('detailBody');
+  bg.classList.add('open');bg.onclick=e=>{if(e.target.id==='detailBg')bg.classList.remove('open')};
+  const now=new Date(),res=scoreAt(cd,ctx,now),reasons=reasonsFrom(cd,ctx,res,now),wins=bestWindows(cd,ctx);
+  const nm=cd.structure==='oyster'?'Oyster reef':'Grass flat';
+  body.innerHTML=`
+    <div class="row" style="margin:2px 2px 6px;align-items:flex-start">
+      <div class="ring" style="--p:${res.score};--rc:${scoreColor(res.score)}"><div class="in"><div><div class="n">${res.score}</div><div class="l">bite now</div></div></div></div>
+      <div style="flex:1;min-width:0"><h2 style="margin:0 0 2px">Suggested: ${nm}</h2>
+      <div class="muted" style="font-size:12.5px">${esc(cd.why)} · ${cd.lat.toFixed(4)}, ${cd.lng.toFixed(4)}</div>
+      <div class="chips" style="margin-top:7px"><span class="badge hab">🌿 mapped habitat</span>${(cd.species||[]).map(x=>`<span class="badge">${esc(x)}</span>`).join('')}</div></div>
+    </div>
+    ${reasons.length?`<div class="card" style="margin:8px 0"><div style="font-weight:700;font-size:13px;margin-bottom:6px">Why it could fish</div>${reasons.map(r=>`<div style="font-size:13.5px;margin:3px 0">• ${esc(r)}</div>`).join('')}</div>`:''}
+    <div class="st" style="margin-top:6px"><h2 style="font-size:16px">Best windows · next 48h</h2></div>
+    ${wins.length?wins.map(w=>`<div class="win"><div class="w-sc" style="background:${scoreColor(w.peak)}">${w.peak}</div><div><div class="w-t">${winSpan(w.start,w.end)}</div><div class="w-r">${esc(w.reason||'')}</div></div></div>`).join(''):'<div class="muted" style="font-size:13px;padding:4px 2px 10px">No strong windows in the next 48h.</div>'}
+    ${outlookHTML(cd,ctx)}
+    <button class="btn" id="saveSuggest" style="margin-top:14px">＋ Save to my spots</button>
+    <div style="height:8px"></div><button class="btn ghost" id="closeSuggest">Close</button>
+    <div class="src">Suggested from FWC/TPWD mapped ${cd.structure==='oyster'?'oyster reef':'seagrass'} data, scored by the same engine. Verify access &amp; conditions before fishing.</div>
+    <div style="height:12px"></div>`;
+  document.getElementById('saveSuggest').onclick=()=>{bg.classList.remove('open');openEdit(null,{lat:cd.lat,lng:cd.lng},{name:nm,structure:cd.structure,species:cd.species});};
+  document.getElementById('closeSuggest').onclick=()=>bg.classList.remove('open');
+}
+
+/* ---- 7-day outlook (trip planning) ---- */
+function dailyOutlook(spot,ctx,days){
+  const out=[],base=new Date();base.setHours(0,0,0,0);const now=Date.now();
+  for(let d=0;d<days;d++){
+    const ds=new Date(base.getTime()+d*864e5);let peak=0,peakT=null;
+    for(let mn=0;mn<1440;mn+=30){const t=new Date(ds.getTime()+mn*6e4);if(t.getTime()<now-18e5)continue;
+      const r=scoreAt(spot,ctx,t).score;if(r>peak){peak=r;peakT=t;}}
+    if(peakT)out.push({day:ds,peak,peakT});
+  }
+  return out;
+}
+function outlookHTML(spot,ctx){
+  const days=dailyOutlook(spot,ctx,7);
+  if(days.length<2)return '';
+  return `<div class="st" style="margin-top:12px"><h2 style="font-size:16px">7-day outlook</h2></div>`+
+    days.map(d=>{const wd=d.day.toLocaleDateString([],{weekday:'short'}),md=d.day.toLocaleDateString([],{month:'numeric',day:'numeric'});
+      return `<div class="win" style="padding:9px 12px"><div class="w-sc" style="width:38px;height:38px;background:${scoreColor(d.peak)}">${d.peak}</div>
+        <div style="flex:1"><div class="w-t">${wd} <span class="muted" style="font-weight:600">${md}</span></div>
+        <div class="w-r">peak bite around ${fmtDate(d.peakT)}</div></div></div>`;}).join('');
+}
 
 /* ============================ TABS ============================ */
 document.querySelectorAll('.nav button').forEach(b=>{
@@ -625,19 +704,20 @@ document.querySelectorAll('.nav button').forEach(b=>{
 });
 
 /* ============================ ADD / EDIT ============================ */
-function openEdit(id,latlng){
+function openEdit(id,latlng,prefill){
   editingId=id;const bg=document.getElementById('editBg');
   const s=id?spots.find(x=>x.id===id):null;
   pendingLatLng=latlng||(s?{lat:s.lat,lng:s.lng}:null);
   document.getElementById('editTitle').textContent=id?'Edit Spot':'New Spot';
   document.getElementById('editCoord').textContent=pendingLatLng?`${pendingLatLng.lat.toFixed(5)}, ${pendingLatLng.lng.toFixed(5)}`:'';
-  document.getElementById('fName').value=s?.name||'';
+  document.getElementById('fName').value=s?.name||prefill?.name||'';
   document.getElementById('fNotes').value=s?.notes||'';
+  const curStruct=s?.structure||prefill?.structure;
   const sc=document.getElementById('structChips');sc.innerHTML='';
-  STRUCTURES.forEach(st=>{const el=document.createElement('button');el.className='pick'+(s?.structure===st.k?' on':'');
+  STRUCTURES.forEach(st=>{const el=document.createElement('button');el.className='pick'+(curStruct===st.k?' on':'');
     el.textContent=st.ic+' '+st.label;el.dataset.k=st.k;
     el.onclick=()=>{sc.querySelectorAll('.pick').forEach(p=>p.classList.remove('on'));el.classList.add('on')};sc.appendChild(el);});
-  const pc=document.getElementById('specChips');pc.innerHTML='';const sel=new Set(s?.species||[]);
+  const pc=document.getElementById('specChips');pc.innerHTML='';const sel=new Set(s?.species||prefill?.species||[]);
   SPECIES.forEach(sp=>{const el=document.createElement('button');el.className='pick'+(sel.has(sp)?' on':'');
     el.textContent=sp;el.onclick=()=>el.classList.toggle('on');pc.appendChild(el);});
   document.getElementById('delSpot').classList.toggle('hidden',!id);
@@ -730,6 +810,7 @@ async function openDetail(id){
       ${wins.length?wins.map(w=>`<div class="win"><div class="w-sc" style="background:${scoreColor(w.peak)}">${w.peak}</div>
         <div style="min-width:0"><div class="w-t">${winSpan(w.start,w.end)}</div><div class="w-r">${esc(w.reason||'')}</div></div></div>`).join('')
         :'<div class="muted" style="font-size:13px;padding:4px 2px 10px">No strong windows in the next 48h — conditions look slow.</div>'}
+      ${outlookHTML(s,ctx)}
       <div class="st" style="margin-top:10px"><h2 style="font-size:16px">Conditions</h2></div>
       <div class="grid2">
         ${tideStat(ctx)}
@@ -776,7 +857,7 @@ function trendTxt(tr){if(tr==null)return '';if(tr<-.4)return 'falling ↓';if(tr
 /* ============================ TODAY TAB ============================ */
 async function renderToday(){
   const body=document.getElementById('todayBody');
-  const loc=userLoc||{lat:map.getCenter().lat,lng:map.getCenter().lng};
+  const loc={lat:map.getCenter().lat,lng:map.getCenter().lng}; // rate the water you're viewing (good for planning from home)
   body.innerHTML='<div class="ld">Reading the water…</div>';
   try{
     const ctx=await getContext(loc.lat,loc.lng);
@@ -797,7 +878,8 @@ async function renderToday(){
         <div class="stat"><div class="k">Wind</div><div class="v">${ctx.cur.wind_speed_10m!=null?Math.round(ctx.cur.wind_speed_10m)+' <span style="font-size:12px">mph</span>':'—'}</div><div class="x">${ctx.cur.wind_direction_10m!=null?deg2c(ctx.cur.wind_direction_10m):''}</div></div>
         <div class="stat"><div class="k">Pressure</div><div class="v">${ctx.cur.pressure_msl!=null?Math.round(ctx.cur.pressure_msl):'—'}<span style="font-size:12px"> mb</span></div><div class="x">${trendTxt(ctx.pressTrendAt(now))}</div></div>
       </div>
-      <div class="src">General rating for your location (generic flat). Tap a saved spot for structure- and species-specific scoring. This is the same engine, just without your spot's tide-stage & habitat tuning.</div>`;
+      ${outlookHTML(probe,ctx)}
+      <div class="src">Rating the water centered on your map (generic flat). Pan the map to plan a different area; tap a saved spot for structure- &amp; species-specific scoring.</div>`;
   }catch(e){body.innerHTML=`<div class="empty">Couldn't load. ${esc(e.message||'')}</div>`}
 }
 
@@ -864,11 +946,13 @@ async function boot(lat,lng,label){
   await scoreAllSpots(); renderSpots();
 }
 if(navigator.geolocation){
-  navigator.geolocation.getCurrentPosition(p=>{
+  navigator.geolocation.getCurrentPosition(async p=>{
     userLoc={lat:p.coords.latitude,lng:p.coords.longitude};
-    map.setView([userLoc.lat,userLoc.lng],12);
     L.circleMarker([userLoc.lat,userLoc.lng],{radius:6,color:'#fff',weight:2,fillColor:'#13a3b8',fillOpacity:1}).addTo(map);
-    boot(userLoc.lat,userLoc.lng,'Your location');
+    if(!_tideStations)_tideStations=await stationList('tidepredictions').catch(()=>null);
+    const st=_tideStations?nearest(_tideStations,userLoc.lat,userLoc.lng):null;
+    if(st&&st.dist<25){map.setView([userLoc.lat,userLoc.lng],12);boot(userLoc.lat,userLoc.lng,'Your location');}
+    else boot(28.45,-96.40,"Port O'Connor, TX");   // inland → plan from the coast, not your driveway
   },()=>boot(28.45,-96.40,"Port O'Connor, TX"),{timeout:8000});
 }else boot(28.45,-96.40,"Port O'Connor, TX");
 </script>
