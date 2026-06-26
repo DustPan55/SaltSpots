@@ -132,6 +132,7 @@
   .row{display:flex;align-items:center;gap:10px}
   .badge{font-size:11.5px;font-weight:700;padding:4px 9px;border-radius:8px;background:var(--tint2);color:var(--teal)}
   .badge.hab{background:color-mix(in srgb,var(--green) 14%,#fff);color:#0a7a52}
+  .badge.dep{background:color-mix(in srgb,var(--blue) 14%,#fff);color:#1d63b8}
   .ld{color:var(--muted);font-size:13px;padding:6px 0}
   .src{font-size:11px;color:var(--muted);margin-top:10px;line-height:1.5}
   .bite{display:flex;gap:4px;font-size:16px}.bite .off{filter:grayscale(1);opacity:.3}
@@ -169,6 +170,7 @@
         <button id="btnFind">✨ Find spots</button>
         <button id="btnOyster">🦪 Oyster</button>
         <button id="btnGrass">🌿 Grass</button>
+        <button id="btnDepth">🌊 Depth</button>
       </div>
       <div class="legend"><span><span class="d" style="background:var(--green)"></span>Hot</span><span><span class="d" style="background:var(--amber)"></span>Fair</span><span><span class="d" style="background:var(--grey)"></span>Slow</span></div>
       <div class="maphint">Tap the map to drop a spot</div>
@@ -226,8 +228,8 @@
 const LS='saltspots.v1';
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
-let habLayers={oyster:null,grass:null};
-const ctxCache={}, habCache={};
+let habLayers={oyster:null,grass:null,depth:null};
+const ctxCache={}, habCache={}, structCache={};
 
 /* ---- Supabase cloud sync (cross-device via a shared sync code) ---- */
 const SB_URL='https://xsnjxqruybhxdandcmol.supabase.co';
@@ -274,7 +276,7 @@ const scoreColor=s=>s==null?'#94a3b8':s>=72?'#10b981':s>=52?'#f59e0b':'#94a3b8';
    FISHING INTELLIGENCE ENGINE
    Transparent weighted model. Every factor returns 0..1; weights sum ~1.
    ==================================================================== */
-const WEIGHTS={tideMove:.26,tideStage:.18,water:.15,timeOfDay:.15,solunar:.10,wind:.08,pressure:.08};
+const WEIGHTS={tideMove:.22,tideStage:.16,water:.13,timeOfDay:.13,solunar:.09,wind:.07,pressure:.06,structure:.14};
 
 // structure -> preferred tide behaviour
 const STRUCT_TIDE={
@@ -391,6 +393,7 @@ function scoreAt(spot,ctx,t){
     solunar:solunarScore(ctx,t),
     wind:windScore(ctx.windAt(t)),
     pressure:pressureScore(ctx,t),
+    structure:(structCache[spot.id]&&!structCache[spot.id].noData)?structCache[spot.id].score:0.6,
   };
   let s=0; for(const k in WEIGHTS)s+=WEIGHTS[k]*f[k];
   const hab=(habCache[spot.id]&&habCache[spot.id].mult)||1;
@@ -413,6 +416,8 @@ function reasonsFrom(spot,ctx,res,t){
   if(f.pressure>.85)out.push('Falling barometer — fish feeding ahead of a change');
   else if(f.pressure<.45)out.push('High, stable pressure — tougher bite');
   if(res.hab>1.02)out.push('On mapped fish habitat');
+  const st=structCache[spot.id];
+  if(st&&!st.noData){ if(f.structure>.75&&st.tags.length)out.unshift(st.tags[0]); else if(f.structure<.42)out.push('Flat, featureless bottom'); }
   return out.slice(0,4);
 }
 const cap=s=>s.charAt(0).toUpperCase()+s.slice(1);
@@ -524,7 +529,7 @@ function refreshMarkers(){Object.values(markers).forEach(m=>map.removeLayer(m));
 // score every spot for the current moment, recolor pins + cache for list
 async function scoreAllSpots(){
   for(const s of spots){
-    try{ await ensureHabitat(s); const ctx=await getContext(s.lat,s.lng);
+    try{ await Promise.all([ensureHabitat(s),ensureStructure(s)]); const ctx=await getContext(s.lat,s.lng);
       s._score=scoreAt(s,ctx,new Date()).score; }
     catch(e){ s._score=null; }
     if(markers[s.id])markers[s.id].setIcon(pinIcon(s._score));
@@ -577,6 +582,46 @@ function featDist(x,y,f){
   return best;
 }
 
+/* ====== SUBSURFACE STRUCTURE — NOAA ENC harbour band (depth areas, contours, dredged channels) ======
+   Differentiates spots by what's UNDER the water: drop-offs, relief, channel edges. */
+const ENC_HARBOUR='https://encdirect.noaa.gov/arcgis/rest/services/encdirect/enc_harbour/MapServer';
+const ENC_L={area:227,contour:104,dredged:228};
+async function fetchENC(bbox){
+  const q=(L,fields,rc)=>fetch(`${ENC_HARBOUR}/${L}/query?geometry=${bbox}&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=${fields}&maxAllowableOffset=0.00008&resultRecordCount=${rc}&f=geojson`).then(r=>r.json()).catch(()=>null);
+  const [a,c,d]=await Promise.all([ q(ENC_L.area,'DRVAL1,DRVAL2',700), q(ENC_L.contour,'VALDCO',700), q(ENC_L.dredged,'DRVAL1,DRVAL2',150) ]);
+  return {areas:a?.features||[],contours:c?.features||[],dredged:d?.features||[]};
+}
+function minVertM(lng,lat,f,distM){const g=f.geometry;if(!g)return 9e9;let best=9e9;const walk=c=>{if(typeof c[0]==='number'){const d=distM(c[0],c[1]);if(d<best)best=d;}else for(const x of c)walk(x);};walk(g.coordinates);return best;}
+const FT=0.3048; // m per ft
+function computeStructure(lat,lng,enc){
+  if(!enc.areas.length&&!enc.contours.length&&!enc.dredged.length)return {score:0.6,tags:[],noData:true};
+  const mlat=110540,mlng=111320*Math.cos(lat*Math.PI/180);
+  const distM=(x,y)=>Math.hypot((x-lng)*mlng,(y-lat)*mlat);
+  let here=null;
+  for(const f of enc.areas){if(pointInFeature(lng,lat,f)){const d1=+f.properties.DRVAL1,d2=+f.properties.DRVAL2;if(!isNaN(d2)){here={d1:isNaN(d1)?d2:d1,d2};break;}}}
+  let dmin=1e9,dmax=-1e9,haveArea=false;
+  for(const f of enc.areas){if(minVertM(lng,lat,f,distM)<220){const d1=+f.properties.DRVAL1,d2=+f.properties.DRVAL2;if(!isNaN(d1)){dmin=Math.min(dmin,d1);haveArea=true;}if(!isNaN(d2)){dmax=Math.max(dmax,d2);haveArea=true;}}}
+  let edgeM=9e9; for(const f of enc.contours){const d=minVertM(lng,lat,f,distM);if(d<edgeM)edgeM=d;}
+  let chM=9e9; for(const f of enc.dredged){const d=pointInFeature(lng,lat,f)?0:minVertM(lng,lat,f,distM);if(d<chM)chM=d;}
+  const reliefFt=(haveArea&&dmax>=dmin)?(dmax-dmin)/FT:null;
+  const depthFt=here?((here.d1+here.d2)/2)/FT:(haveArea?dmin/FT:null);
+  const edge=edgeM<9e8?clamp(1-(edgeM-25)/220,0.3,1):0.45;  // on a contour break = best, floor so far-from-edge isn't zero
+  const relief=reliefFt!=null?clamp(0.25+reliefFt/8):0.5;  // ~6ft relief nearby → ~0.95
+  const chanBonus=chM<60?0.22:chM<160?0.13:chM<450?0.05:0; // channel-edge bonus
+  const score=clamp(0.48*edge+0.40*relief+chanBonus);
+  const tags=[];
+  if(edgeM<45)tags.push('On a depth break / drop-off');
+  if(reliefFt!=null&&reliefFt>=4)tags.push(`${Math.round(reliefFt)} ft of relief nearby`);
+  if(chM<160)tags.push('Beside a channel / cut');
+  if(depthFt!=null)tags.push(`~${Math.round(depthFt)} ft deep`);
+  return {score,tags,depthFt,reliefFt,edgeM,chM,noData:false};
+}
+async function ensureStructure(s){
+  if(structCache[s.id])return structCache[s.id];
+  const d=0.0055,bbox=`${s.lng-d},${s.lat-d},${s.lng+d},${s.lat+d}`;
+  return structCache[s.id]=computeStructure(s.lat,s.lng,await fetchENC(bbox));
+}
+
 /* habitat overlays — region-aware (FL = FWC, TX = TPWD Coastal Fisheries) */
 const TPWD='https://services1.arcgis.com/1mtXwieMId59thmg/arcgis/rest/services';
 const HAB_REGIONS=[
@@ -612,6 +657,24 @@ async function toggleHabitat(kind){
 document.getElementById('btnOyster').onclick=()=>toggleHabitat('oyster');
 document.getElementById('btnGrass').onclick=()=>toggleHabitat('grass');
 document.getElementById('btnFind').onclick=suggestSpots;
+document.getElementById('btnDepth').onclick=toggleDepth;
+
+/* Depth overlay — charted channels (dredged) + depth contours from NOAA ENC */
+async function toggleDepth(){
+  const btn=document.getElementById('btnDepth');
+  if(habLayers.depth){map.removeLayer(habLayers.depth);habLayers.depth=null;btn.classList.remove('on');return;}
+  if(map.getZoom()<12){toast('Zoom in closer to load depth');return;}
+  btn.classList.add('on');toast('Loading depth & channels…');
+  const b=map.getBounds(),bbox=`${b.getWest()},${b.getSouth()},${b.getEast()},${b.getNorth()}`;
+  try{
+    const enc=await fetchENC(bbox);
+    if(!enc.dredged.length&&!enc.contours.length){toast('No charted depth here');btn.classList.remove('on');return;}
+    const grp=L.featureGroup();
+    if(enc.contours.length)L.geoJSON({type:'FeatureCollection',features:enc.contours},{style:{color:'#2563eb',weight:1,opacity:.45,fill:false}}).addTo(grp);
+    if(enc.dredged.length)L.geoJSON({type:'FeatureCollection',features:enc.dredged},{style:{color:'#1d4ed8',weight:1.2,fillColor:'#3b82f6',fillOpacity:.32}}).bindTooltip('Dredged channel').addTo(grp);
+    grp.addTo(map);habLayers.depth=grp;
+  }catch(e){btn.classList.remove('on');toast('Depth data unavailable here')}
+}
 
 /* ---- Suggested spots: derive candidates from mapped habitat, score, rank ---- */
 let suggestMarkers=[];
@@ -624,8 +687,8 @@ async function suggestSpots(){
   btn.classList.add('on');toast('Scanning mapped habitat…');
   const b=map.getBounds(),bbox=`${b.getWest()},${b.getSouth()},${b.getEast()},${b.getNorth()}`;
   const q=(u,rc)=>fetch(`${u}/query?geometry=${bbox}&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=*&maxAllowableOffset=0.0002&resultRecordCount=${rc}&f=geojson`).then(r=>r.json()).catch(()=>null);
-  let oys,grs,ctx;
-  try{ [oys,grs,ctx]=await Promise.all([ Promise.all(region.oyster.map(u=>q(u,120))), Promise.all(region.grass.map(u=>q(u,120))), getContext(c.lat,c.lng) ]); }
+  let oys,grs,ctx,enc;
+  try{ [oys,grs,ctx,enc]=await Promise.all([ Promise.all(region.oyster.map(u=>q(u,120))), Promise.all(region.grass.map(u=>q(u,120))), getContext(c.lat,c.lng), fetchENC(bbox) ]); }
   catch(e){btn.classList.remove('on');return toast('Could not load habitat');}
   const defSpecies=region.name==='Texas'?['Redfish','Trout']:['Redfish','Snook'];
   const cands=[];
@@ -635,7 +698,7 @@ async function suggestSpots(){
   const grid={},cell=0.0045;
   for(const cd of cands){const k=Math.round(cd.lat/cell)+','+Math.round(cd.lng/cell);if(!grid[k]||(cd.structure==='oyster'&&grid[k].structure!=='oyster'))grid[k]=cd;}
   let list=Object.values(grid).filter(cd=>!spots.some(s=>hav(s.lat,s.lng,cd.lat,cd.lng)<0.25));
-  list.forEach((cd,i)=>{cd.id='sg'+i;cd.species=defSpecies;habCache[cd.id]={mult:cd.mult};cd.score=scoreAt(cd,ctx,new Date()).score;});
+  list.forEach((cd,i)=>{cd.id='sg'+i;cd.species=defSpecies;habCache[cd.id]={mult:cd.mult};structCache[cd.id]=computeStructure(cd.lat,cd.lng,enc);cd.score=scoreAt(cd,ctx,new Date()).score;});
   list.sort((a,b)=>b.score-a.score);
   const top=list.slice(0,14);
   clearSuggest();
@@ -655,7 +718,7 @@ function openSuggest(cd,ctx){
       <div class="ring" style="--p:${res.score};--rc:${scoreColor(res.score)}"><div class="in"><div><div class="n">${res.score}</div><div class="l">bite now</div></div></div></div>
       <div style="flex:1;min-width:0"><h2 style="margin:0 0 2px">Suggested: ${nm}</h2>
       <div class="muted" style="font-size:12.5px">${esc(cd.why)} · ${cd.lat.toFixed(4)}, ${cd.lng.toFixed(4)}</div>
-      <div class="chips" style="margin-top:7px"><span class="badge hab">🌿 mapped habitat</span>${(cd.species||[]).map(x=>`<span class="badge">${esc(x)}</span>`).join('')}</div></div>
+      <div class="chips" style="margin-top:7px"><span class="badge hab">🌿 mapped habitat</span>${((structCache[cd.id]||{}).tags||[]).map(t=>`<span class="badge dep">🌊 ${esc(t)}</span>`).join('')}${(cd.species||[]).map(x=>`<span class="badge">${esc(x)}</span>`).join('')}</div></div>
     </div>
     ${reasons.length?`<div class="card" style="margin:8px 0"><div style="font-weight:700;font-size:13px;margin-bottom:6px">Why it could fish</div>${reasons.map(r=>`<div style="font-size:13.5px;margin:3px 0">• ${esc(r)}</div>`).join('')}</div>`:''}
     <div class="st" style="margin-top:6px"><h2 style="font-size:16px">Best windows · next 48h</h2></div>
@@ -787,13 +850,13 @@ async function openDetail(id){
   body.innerHTML=`<div class="ld" style="text-align:center;padding:30px">Reading the water…</div>`;
   bg.onclick=e=>{if(e.target.id==='detailBg')bg.classList.remove('open')};
   try{
-    await ensureHabitat(s);
+    await Promise.all([ensureHabitat(s),ensureStructure(s)]);
     const ctx=await getContext(s.lat,s.lng);
     const now=new Date(),res=scoreAt(s,ctx,now),reasons=reasonsFrom(s,ctx,res,now);
     s._score=res.score; if(markers[s.id])markers[s.id].setIcon(pinIcon(res.score));
     const wins=bestWindows(s,ctx);
-    const hab=habCache[s.id]||{tags:[]};
-    const FN=[['tideMove','Current'],['tideStage','Tide stage'],['water','Water temp'],['timeOfDay','Time of day'],['solunar','Solunar'],['wind','Wind'],['pressure','Pressure']];
+    const hab=habCache[s.id]||{tags:[]};const struc=structCache[s.id]||{tags:[]};
+    const FN=[['tideMove','Current'],['tideStage','Tide stage'],['structure','Bottom structure'],['water','Water temp'],['timeOfDay','Time of day'],['solunar','Solunar'],['wind','Wind'],['pressure','Pressure']];
     body.innerHTML=`
       <div class="row" style="margin:2px 2px 6px;align-items:flex-start">
         <div class="ring" style="--p:${res.score};--rc:${scoreColor(res.score)}"><div class="in"><div><div class="n">${res.score}</div><div class="l">bite now</div></div></div></div>
@@ -803,6 +866,7 @@ async function openDetail(id){
           <div class="chips" style="margin-top:7px">
             ${(s.species||[]).map(x=>`<span class="badge">${esc(x)}</span>`).join('')}
             ${hab.tags.map(t=>`<span class="badge hab">🌿 ${esc(t)}</span>`).join('')}
+            ${(struc.tags||[]).map(t=>`<span class="badge dep">🌊 ${esc(t)}</span>`).join('')}
           </div>
         </div>
       </div>
@@ -820,6 +884,7 @@ async function openDetail(id){
         <div class="stat"><div class="k">Pressure</div><div class="v">${ctx.cur.pressure_msl!=null?Math.round(ctx.cur.pressure_msl):'—'}<span style="font-size:12px"> mb</span></div><div class="x">${trendTxt(ctx.pressTrendAt(now))}</div></div>
         <div class="stat"><div class="k">Air</div><div class="v">${ctx.cur.temperature_2m!=null?Math.round(ctx.cur.temperature_2m)+'°':'—'}</div><div class="x">${wmo(ctx.cur.weather_code)}</div></div>
         <div class="stat"><div class="k">Moon</div><div class="v" style="font-size:18px">${ctx.moon.emoji} ${Math.round(ctx.moon.illum*100)}%</div><div class="x">${ctx.moon.name}</div></div>
+        <div class="stat"><div class="k">Bottom</div><div class="v">${struc.depthFt!=null?Math.round(struc.depthFt)+'<span style="font-size:13px"> ft</span>':'—'}</div><div class="x">${struc.reliefFt!=null?Math.round(struc.reliefFt)+' ft relief near':struc.noData?'no chart data':'charted depth'}</div></div>
       </div>
       <div class="card" style="margin-top:12px">
         <div style="font-weight:700;font-size:13px;margin-bottom:8px">Score breakdown</div>
