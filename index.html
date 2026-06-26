@@ -593,33 +593,74 @@ async function fetchENC(bbox){
 }
 function minVertM(lng,lat,f,distM){const g=f.geometry;if(!g)return 9e9;let best=9e9;const walk=c=>{if(typeof c[0]==='number'){const d=distM(c[0],c[1]);if(d<best)best=d;}else for(const x of c)walk(x);};walk(g.coordinates);return best;}
 const FT=0.3048; // m per ft
-function computeStructure(lat,lng,enc){
-  if(!enc.areas.length&&!enc.contours.length&&!enc.dredged.length)return {score:0.6,tags:[],noData:true};
-  const mlat=110540,mlng=111320*Math.cos(lat*Math.PI/180);
-  const distM=(x,y)=>Math.hypot((x-lng)*mlng,(y-lat)*mlat);
-  let here=null;
-  for(const f of enc.areas){if(pointInFeature(lng,lat,f)){const d1=+f.properties.DRVAL1,d2=+f.properties.DRVAL2;if(!isNaN(d2)){here={d1:isNaN(d1)?d2:d1,d2};break;}}}
-  let dmin=1e9,dmax=-1e9,haveArea=false;
-  for(const f of enc.areas){if(minVertM(lng,lat,f,distM)<220){const d1=+f.properties.DRVAL1,d2=+f.properties.DRVAL2;if(!isNaN(d1)){dmin=Math.min(dmin,d1);haveArea=true;}if(!isNaN(d2)){dmax=Math.max(dmax,d2);haveArea=true;}}}
-  let edgeM=9e9; for(const f of enc.contours){const d=minVertM(lng,lat,f,distM);if(d<edgeM)edgeM=d;}
-  let chM=9e9; for(const f of enc.dredged){const d=pointInFeature(lng,lat,f)?0:minVertM(lng,lat,f,distM);if(d<chM)chM=d;}
-  const reliefFt=(haveArea&&dmax>=dmin)?(dmax-dmin)/FT:null;
-  const depthFt=here?((here.d1+here.d2)/2)/FT:(haveArea?dmin/FT:null);
-  const edge=edgeM<9e8?clamp(1-(edgeM-25)/220,0.3,1):0.45;  // on a contour break = best, floor so far-from-edge isn't zero
-  const relief=reliefFt!=null?clamp(0.25+reliefFt/8):0.5;  // ~6ft relief nearby → ~0.95
-  const chanBonus=chM<60?0.22:chM<160?0.13:chM<450?0.05:0; // channel-edge bonus
-  const score=clamp(0.48*edge+0.40*relief+chanBonus);
+/* High-res depth from NCEI DEM_all mosaic — serves ~3 m CUDEM topobathy where available.
+   getSamples lets us read an n×n grid in one request → real slope/relief/holes/bars. */
+const DEM_ALL='https://gis.ngdc.noaa.gov/arcgis/rest/services/DEM_mosaics/DEM_all/ImageServer';
+function gridPoints(lat,lng,n,spanM){
+  const mlat=110540,mlng=111320*Math.cos(lat*Math.PI/180),half=spanM/2,step=spanM/(n-1),pts=[];
+  for(let j=0;j<n;j++)for(let i=0;i<n;i++)pts.push([lng+(-half+i*step)/mlng, lat+(-half+j*step)/mlat]);
+  return pts;
+}
+async function sampleDEM(points){
+  if(!points.length)return null;
+  const CH=200, out=[]; // chunked POST (avoids GET URL-length limit, stays under sample cap)
+  for(let i=0;i<points.length;i+=CH){
+    const chunk=points.slice(i,i+CH);
+    const body=new URLSearchParams({geometry:JSON.stringify({points:chunk,spatialReference:{wkid:4326}}),geometryType:'esriGeometryMultipoint',returnFirstValueOnly:'true',f:'json'});
+    const j=await fetch(`${DEM_ALL}/getSamples`,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body}).then(r=>r.json()).catch(()=>null);
+    if(!j||!j.samples)return null;
+    for(let k=0;k<chunk.length;k++){const s=j.samples[k];const v=s?parseFloat(s.value):NaN;out.push(isNaN(v)?null:v);}
+  }
+  return out;
+}
+async function fetchDredged(bbox){
+  const r=await fetch(`${ENC_HARBOUR}/${ENC_L.dredged}/query?geometry=${bbox}&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=DRVAL1,DRVAL2&maxAllowableOffset=0.00008&resultRecordCount=80&f=geojson`).then(r=>r.json()).catch(()=>null);
+  return r?.features||[];
+}
+function nearestChannelFromFeatures(lat,lng,feats){
+  if(!feats||!feats.length)return 9e9;
+  const mlat=110540,mlng=111320*Math.cos(lat*Math.PI/180),distM=(x,y)=>Math.hypot((x-lng)*mlng,(y-lat)*mlat);
+  let best=9e9;for(const f of feats){const d=pointInFeature(lng,lat,f)?0:minVertM(lng,lat,f,distM);if(d<best)best=d;}return best;
+}
+// analyze an n×n elevation grid (m, negative = underwater) → structure score + feature
+function computeStructureFromGrid(elevs,n,spanM,chM){
+  const present=elevs?elevs.filter(v=>v!=null):[];
+  if(present.length<n*n*0.6)return {score:0.6,tags:[],noData:true};
+  const mn=Math.min(...present),mx=Math.max(...present),center=elevs[(n*n-1)/2];
+  const reliefFt=(mx-mn)/FT, cell=spanM/(n-1);
+  let maxAdj=0;
+  for(let j=0;j<n;j++)for(let i=0;i<n;i++){const k=j*n+i;if(elevs[k]==null)continue;
+    if(i+1<n&&elevs[k+1]!=null)maxAdj=Math.max(maxAdj,Math.abs(elevs[k+1]-elevs[k]));
+    if(j+1<n&&elevs[k+n]!=null)maxAdj=Math.max(maxAdj,Math.abs(elevs[k+n]-elevs[k]));}
+  const slopeFtPer100=(maxAdj/FT)/(cell/100);
+  const depthFt=center!=null?-center/FT:-((mn+mx)/2)/FT;
+  let feature='flat';const range=(mx-mn)||1e-4,rel=center!=null?(center-mn)/range:0.5;
+  if(reliefFt>=2)feature=rel<0.28?'hole':rel>0.72?'bar':'edge';
+  const reliefN=clamp(reliefFt/6), slopeN=clamp(slopeFtPer100/4);
+  const featBonus=feature==='edge'?0.12:feature==='hole'?0.10:feature==='bar'?0.08:0;
+  const chanBonus=chM<60?0.18:chM<160?0.10:chM<450?0.04:0;
+  const score=clamp(0.42*slopeN+0.40*reliefN+featBonus+chanBonus+0.06);
   const tags=[];
-  if(edgeM<45)tags.push('On a depth break / drop-off');
-  if(reliefFt!=null&&reliefFt>=4)tags.push(`${Math.round(reliefFt)} ft of relief nearby`);
+  if(feature==='hole')tags.push('Deeper hole / pool');
+  else if(feature==='bar')tags.push('Bar / hump');
+  else if(feature==='edge'&&slopeFtPer100>=2)tags.push('On a drop-off / break');
+  if(reliefFt>=3)tags.push(`${reliefFt.toFixed(1)} ft relief nearby`);
   if(chM<160)tags.push('Beside a channel / cut');
-  if(depthFt!=null)tags.push(`~${Math.round(depthFt)} ft deep`);
-  return {score,tags,depthFt,reliefFt,edgeM,chM,noData:false};
+  if(depthFt>0)tags.push(`~${depthFt.toFixed(1)} ft deep`);
+  return {score,tags,depthFt:depthFt>0?depthFt:null,reliefFt,slopeFtPer100,feature,chM,noData:false};
+}
+async function applyStructureBatch(list,dredged){
+  const n=5,span=160,allPts=[];
+  list.forEach(cd=>{cd._gi=allPts.length;const g=gridPoints(cd.lat,cd.lng,n,span);cd._gn=g.length;for(const p of g)allPts.push(p);});
+  const elevs=await sampleDEM(allPts);
+  list.forEach(cd=>{const sub=elevs?elevs.slice(cd._gi,cd._gi+cd._gn):null;structCache[cd.id]=computeStructureFromGrid(sub,n,span,nearestChannelFromFeatures(cd.lat,cd.lng,dredged||[]));});
 }
 async function ensureStructure(s){
   if(structCache[s.id])return structCache[s.id];
-  const d=0.0055,bbox=`${s.lng-d},${s.lat-d},${s.lng+d},${s.lat+d}`;
-  return structCache[s.id]=computeStructure(s.lat,s.lng,await fetchENC(bbox));
+  const n=5,span=160,pts=gridPoints(s.lat,s.lng,n,span);
+  const d=0.0035,bbox=`${s.lng-d},${s.lat-d},${s.lng+d},${s.lat+d}`;
+  const [elevs,dredged]=await Promise.all([sampleDEM(pts),fetchDredged(bbox)]);
+  return structCache[s.id]=computeStructureFromGrid(elevs,n,span,nearestChannelFromFeatures(s.lat,s.lng,dredged));
 }
 
 /* habitat overlays — region-aware (FL = FWC, TX = TPWD Coastal Fisheries) */
@@ -698,7 +739,10 @@ async function suggestSpots(){
   const grid={},cell=0.0045;
   for(const cd of cands){const k=Math.round(cd.lat/cell)+','+Math.round(cd.lng/cell);if(!grid[k]||(cd.structure==='oyster'&&grid[k].structure!=='oyster'))grid[k]=cd;}
   let list=Object.values(grid).filter(cd=>!spots.some(s=>hav(s.lat,s.lng,cd.lat,cd.lng)<0.25));
-  list.forEach((cd,i)=>{cd.id='sg'+i;cd.species=defSpecies;habCache[cd.id]={mult:cd.mult};structCache[cd.id]=computeStructure(cd.lat,cd.lng,enc);cd.score=scoreAt(cd,ctx,new Date()).score;});
+  list=list.slice(0,24);   // cap before DEM sampling (one multipoint request)
+  list.forEach((cd,i)=>{cd.id='sg'+i;cd.species=defSpecies;habCache[cd.id]={mult:cd.mult};});
+  await applyStructureBatch(list,enc.dredged);
+  list.forEach(cd=>{cd.score=scoreAt(cd,ctx,new Date()).score;});
   list.sort((a,b)=>b.score-a.score);
   const top=list.slice(0,14);
   clearSuggest();
@@ -884,7 +928,7 @@ async function openDetail(id){
         <div class="stat"><div class="k">Pressure</div><div class="v">${ctx.cur.pressure_msl!=null?Math.round(ctx.cur.pressure_msl):'—'}<span style="font-size:12px"> mb</span></div><div class="x">${trendTxt(ctx.pressTrendAt(now))}</div></div>
         <div class="stat"><div class="k">Air</div><div class="v">${ctx.cur.temperature_2m!=null?Math.round(ctx.cur.temperature_2m)+'°':'—'}</div><div class="x">${wmo(ctx.cur.weather_code)}</div></div>
         <div class="stat"><div class="k">Moon</div><div class="v" style="font-size:18px">${ctx.moon.emoji} ${Math.round(ctx.moon.illum*100)}%</div><div class="x">${ctx.moon.name}</div></div>
-        <div class="stat"><div class="k">Bottom</div><div class="v">${struc.depthFt!=null?Math.round(struc.depthFt)+'<span style="font-size:13px"> ft</span>':'—'}</div><div class="x">${struc.reliefFt!=null?Math.round(struc.reliefFt)+' ft relief near':struc.noData?'no chart data':'charted depth'}</div></div>
+        <div class="stat"><div class="k">Bottom</div><div class="v">${struc.depthFt!=null?struc.depthFt.toFixed(1)+'<span style="font-size:13px"> ft</span>':'—'}</div><div class="x">${struc.noData?'no DEM here':[(struc.reliefFt!=null?struc.reliefFt.toFixed(1)+' ft relief':''),(struc.feature&&struc.feature!=='flat'?struc.feature:'')].filter(Boolean).join(' · ')||'~3 m DEM'}</div></div>
       </div>
       <div class="card" style="margin-top:12px">
         <div style="font-weight:700;font-size:13px;margin-bottom:8px">Score breakdown</div>
@@ -894,7 +938,7 @@ async function openDetail(id){
       ${s.notes?`<div class="card" style="font-size:14px;line-height:1.55"><div style="font-weight:700;font-size:13px;margin-bottom:5px">Notes</div>${esc(s.notes).replace(/\n/g,'<br>')}</div>`:''}
       <button class="btn ghost" id="editFromDetail" style="margin-top:4px">Edit spot</button>
       <div style="height:8px"></div><button class="btn ghost" id="closeDetail">Close</button>
-      <div class="src">Tides &amp; water temp: NOAA CO-OPS · weather/waves: Open-Meteo · habitat: FL FWC &amp; TX TPWD (oyster &amp; seagrass) · solunar computed. Scores are a model — your local knowledge wins. Check conditions before heading out.</div>
+      <div class="src">Tides &amp; water temp: NOAA CO-OPS · weather/waves: Open-Meteo · habitat: FL FWC &amp; TX TPWD (oyster &amp; seagrass) · depth/structure: NCEI CUDEM ~3 m + NOAA ENC · solunar computed. Scores are a model — your local knowledge wins. Check conditions before heading out.</div>
       <div style="height:12px"></div>`;
     document.getElementById('editFromDetail').onclick=()=>{bg.classList.remove('open');openEdit(s.id)};
     document.getElementById('closeDetail').onclick=()=>bg.classList.remove('open');
