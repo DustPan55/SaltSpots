@@ -1,0 +1,17 @@
+{
+  "name": "Salt Spots",
+  "short_name": "Salt Spots",
+  "description": "Inshore fishing-spot tracker with a live bite-scoring engine",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a4f63",
+  "theme_color": "#0d7d8f",
+  "categories": ["sports", "navigation", "lifestyle"],
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
