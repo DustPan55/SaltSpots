@@ -39,7 +39,8 @@
   input,select,textarea{font-family:inherit;font-size:16px}
   .hidden{display:none!important}
 
-  .screen{max-width:560px;margin:0 auto;padding:0 0 90px;min-height:100vh}
+  .screen{max-width:560px;margin:0 auto;padding:0;min-height:100vh}
+  #tabSpots,#tabToday{padding-bottom:96px}
   .pad{padding:16px}
   .card{background:var(--card);border-radius:18px;border:1px solid var(--line);box-shadow:var(--shadow);padding:16px;margin-bottom:14px}
   .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;
@@ -61,7 +62,7 @@
   .chip .v{font-weight:800;font-size:16px;line-height:1.1}
   .chip .k{font-size:10.5px;opacity:.82;margin-top:3px;text-transform:uppercase;letter-spacing:.04em}
 
-  #map{height:48vh;min-height:320px;width:100%;z-index:1}
+  #map{height:60vh;min-height:320px;width:100%;z-index:1}
   .mapwrap{position:relative}
   .maphint{position:absolute;left:50%;transform:translateX(-50%);bottom:14px;z-index:500;
     background:rgba(14,42,50,.86);color:#fff;font-size:12.5px;font-weight:600;padding:8px 14px;border-radius:20px;
@@ -697,7 +698,7 @@ document.querySelectorAll('.nav button').forEach(b=>{
     document.getElementById('tabMap').classList.toggle('hidden',t!=='Map');
     document.getElementById('tabSpots').classList.toggle('hidden',t!=='Spots');
     document.getElementById('tabToday').classList.toggle('hidden',t!=='Today');
-    if(t==='Map'&&map)setTimeout(()=>map.invalidateSize(),60);
+    if(t==='Map'&&map)setTimeout(sizeMap,60);
     if(t==='Spots')renderSpots();
     if(t==='Today')renderToday();
   };
@@ -938,6 +939,9 @@ async function loadHeader(lat,lng,label){
 
 /* ============================ BOOT ============================ */
 initMap();renderSpots();
+// size the map to fill the space between header and bottom nav
+function sizeMap(){const el=document.getElementById('map');if(!el)return;const top=el.getBoundingClientRect().top+window.scrollY;const navH=(document.querySelector('.nav')||{}).offsetHeight||60;el.style.height=Math.max(300,window.innerHeight-top-navH)+'px';if(map)map.invalidateSize();}
+sizeMap();window.addEventListener('resize',sizeMap);window.addEventListener('load',sizeMap);window.addEventListener('orientationchange',()=>setTimeout(sizeMap,250));
 async function boot(lat,lng,label){
   loadHeader(lat,lng,label);
   const cloud=await pullSpots().catch(()=>null);   // localStorage already painted; replace with cloud if available
