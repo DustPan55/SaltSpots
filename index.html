@@ -183,6 +183,21 @@
     <div id="spotList"></div>
   </section>
 
+  <section id="tabCatches" class="pad hidden">
+    <div class="st"><h2>Catch Log</h2><button class="btn sm" id="btnLogCatch" style="width:auto">＋ Log catch</button></div>
+    <div class="card" id="catchAgentCard">
+      <div class="row">
+        <div style="font-size:22px">🧠</div>
+        <div style="flex:1;min-width:0"><div style="font-weight:800">What's working</div>
+        <div class="muted" style="font-size:12px">Validated patterns from your real catches</div></div>
+        <button class="btn sm" id="btnCatchAgent" style="width:auto">Analyze</button>
+      </div>
+      <div id="catchAgentOut" style="margin-top:6px"></div>
+    </div>
+    <div id="catchStats"></div>
+    <div id="catchList"></div>
+  </section>
+
   <section id="tabToday" class="pad hidden">
     <div class="st"><h2>Today on the Water</h2></div>
     <div id="todayBody"></div>
@@ -203,6 +218,7 @@
 <nav class="nav">
   <button data-tab="Map" class="on"><span class="i">🗺️</span>Map</button>
   <button data-tab="Spots"><span class="i">📍</span>Spots</button>
+  <button data-tab="Catches"><span class="i">🐟</span>Catches</button>
   <button data-tab="Today"><span class="i">🌙</span>Today</button>
 </nav>
 
@@ -227,6 +243,30 @@
 </div></div></div>
 
 <div class="sheet-bg" id="detailBg"><div class="sheet"><div class="grab"></div><div class="pad" id="detailBody"></div></div></div>
+
+<div class="sheet-bg" id="logBg"><div class="sheet"><div class="grab"></div><div class="pad">
+  <h2 style="margin:2px 2px 2px">Log a Catch</h2>
+  <div class="muted" id="logWhere" style="font-size:12.5px;margin:0 2px"></div>
+  <label class="fld">Species</label>
+  <div class="chips" id="logSpecies"></div>
+  <label class="fld">How many?</label>
+  <div class="row" style="gap:12px">
+    <button class="btn ghost" id="logMinus" style="width:46px;padding:10px 0;font-size:20px">−</button>
+    <div id="logCount" style="font-weight:800;font-size:22px;min-width:28px;text-align:center">1</div>
+    <button class="btn ghost" id="logPlus" style="width:46px;padding:10px 0;font-size:20px">＋</button>
+    <input class="in" id="logLen" placeholder="length in. (opt)" inputmode="decimal" style="flex:1">
+  </div>
+  <label class="fld">Bait / lure (optional)</label>
+  <input class="in" id="logBait" placeholder="e.g. gold spoon, live shrimp, paddletail">
+  <label class="fld">Notes (optional)</label>
+  <textarea class="in" id="logNotes" placeholder="where on the spot, what they were doing…"></textarea>
+  <div class="muted" id="logCond" style="font-size:12px;margin:10px 2px">📍 Current conditions (tide, water temp, wind, structure) are captured automatically when you save.</div>
+  <div style="height:6px"></div>
+  <button class="btn" id="logSave">Save catch</button>
+  <div style="height:8px"></div>
+  <button class="btn ghost" id="logCancel">Cancel</button>
+  <div style="height:10px"></div>
+</div></div></div>
 
 <div class="toast" id="toast"></div>
 
@@ -261,6 +301,21 @@ async function pushSpot(s){
   if(error)console.warn('push',error.message);
 }
 async function removeSpot(id){if(!sb)return;const {error}=await sb.from('salt_spots').delete().eq('id',id);if(error)console.warn('del',error.message);}
+
+/* ---- Catch log (same sync-code model) ---- */
+const LSC='saltspots.catches.v1';
+let catches=loadCatches();
+function loadCatches(){try{return JSON.parse(localStorage.getItem(LSC))||[]}catch(e){return[]}}
+function saveCatches(){localStorage.setItem(LSC,JSON.stringify(catches))}
+function catchRow(c){return {id:c.id,sync_code:syncCode,spot_id:c.spot_id,spot_name:c.spot_name,lat:c.lat,lng:c.lng,species:c.species,count:c.count,length_in:c.length_in,bait:c.bait,notes:c.notes,structure:c.structure,conditions:c.conditions,caught_at:c.caught_at};}
+async function pullCatches(){
+  if(!sb)return null;
+  const {data,error}=await sb.from('salt_catches').select('*').eq('sync_code',syncCode).order('caught_at',{ascending:false});
+  if(error){console.warn('pullC',error.message);return null;}
+  return data.map(r=>({id:r.id,spot_id:r.spot_id,spot_name:r.spot_name,lat:r.lat,lng:r.lng,species:r.species,count:r.count,length_in:r.length_in,bait:r.bait,notes:r.notes,structure:r.structure,conditions:r.conditions||{},caught_at:r.caught_at}));
+}
+async function pushCatch(c){if(!sb)return;const {error}=await sb.from('salt_catches').upsert(catchRow(c));if(error)console.warn('pushC',error.message);}
+async function removeCatch(id){if(!sb)return;await sb.from('salt_catches').delete().eq('id',id);}
 
 const STRUCTURES=[
   {k:'flat',label:'Grass flat',ic:'🌿'},{k:'oyster',label:'Oyster bar',ic:'🦪'},
@@ -666,12 +721,34 @@ async function applyStructureBatch(list,dredged){
   const elevs=await sampleDEM(allPts);
   list.forEach(cd=>{const sub=elevs?elevs.slice(cd._gi,cd._gi+cd._gn):null;structCache[cd.id]=computeStructureFromGrid(sub,n,span,nearestChannelFromFeatures(cd.lat,cd.lng,dredged||[]));});
 }
-async function ensureStructure(s){
-  if(structCache[s.id])return structCache[s.id];
-  const n=5,span=160,pts=gridPoints(s.lat,s.lng,n,span);
-  const d=0.0035,bbox=`${s.lng-d},${s.lat-d},${s.lng+d},${s.lat+d}`;
+async function structureAt(id,lat,lng){
+  if(structCache[id])return structCache[id];
+  const n=5,span=160,pts=gridPoints(lat,lng,n,span),d=0.0035,bbox=`${lng-d},${lat-d},${lng+d},${lat+d}`;
   const [elevs,dredged]=await Promise.all([sampleDEM(pts),fetchDredged(bbox)]);
-  return structCache[s.id]=computeStructureFromGrid(elevs,n,span,nearestChannelFromFeatures(s.lat,s.lng,dredged));
+  return structCache[id]=computeStructureFromGrid(elevs,n,span,nearestChannelFromFeatures(lat,lng,dredged));
+}
+async function ensureStructure(s){return structCache[s.id]||structureAt(s.id,s.lat,s.lng);}
+// capture the engine's computed conditions at a point — stored with each catch so the agent can learn
+async function snapshotAt(lat,lng,structure,species,id){
+  id=id||('cap_'+Math.round(lat*1e4)+'_'+Math.round(lng*1e4));
+  if(!habCache[id])habCache[id]=await habitatFor(lat,lng).catch(()=>({mult:1,tags:[]}));
+  if(!structCache[id])await structureAt(id,lat,lng).catch(()=>{structCache[id]={score:0.6,tags:[],noData:true};});
+  const ctx=await getContext(lat,lng), now=new Date();
+  const res=scoreAt({id,structure:structure||'flat',species:species||[]},ctx,now);
+  const st=structCache[id]||{};
+  return {
+    tide: ctx.tide.pts.length?(slopeAt(ctx.tide,now)>0?'rising':'falling'):null,
+    waterTempF: ctx.water,
+    windMph: ctx.cur.wind_speed_10m!=null?Math.round(ctx.cur.wind_speed_10m):null,
+    windDir: ctx.cur.wind_direction_10m!=null?deg2c(ctx.cur.wind_direction_10m):null,
+    pressureMb: ctx.cur.pressure_msl!=null?Math.round(ctx.cur.pressure_msl):null,
+    pressureTrend: trendTxt(ctx.pressTrendAt(now)),
+    moon: ctx.moon.name, moonIllumPct: Math.round(ctx.moon.illum*100),
+    biteScore: res.score,
+    bottom: st.noData?null:{depthFt:st.depthFt!=null?+st.depthFt.toFixed(1):null,reliefFt:st.reliefFt!=null?+st.reliefFt.toFixed(1):null,feature:st.feature},
+    structure: structure||null,
+    hourLocal: now.getHours()
+  };
 }
 
 /* habitat overlays — region-aware (FL = FWC, TX = TPWD Coastal Fisheries) */
@@ -816,9 +893,11 @@ document.querySelectorAll('.nav button').forEach(b=>{
     const t=b.dataset.tab;
     document.getElementById('tabMap').classList.toggle('hidden',t!=='Map');
     document.getElementById('tabSpots').classList.toggle('hidden',t!=='Spots');
+    document.getElementById('tabCatches').classList.toggle('hidden',t!=='Catches');
     document.getElementById('tabToday').classList.toggle('hidden',t!=='Today');
     if(t==='Map'&&map)setTimeout(sizeMap,60);
     if(t==='Spots')renderSpots();
+    if(t==='Catches')renderCatches();
     if(t==='Today')renderToday();
   };
 });
@@ -894,7 +973,7 @@ function wireSync(){
     if(!c||!c.trim())return;
     syncCode=c.trim().toUpperCase();localStorage.setItem('saltspots.sync',syncCode);
     toast('Synced to '+syncCode);
-    const cloud=await pullSpots();spots=cloud||[];save();refreshMarkers();renderSpots();scoreAllSpots().then(()=>renderSpots());
+    const [cloud,cloudC]=await Promise.all([pullSpots(),pullCatches()]);spots=cloud||[];catches=cloudC||[];save();saveCatches();refreshMarkers();renderSpots();renderCatches();scoreAllSpots().then(()=>renderSpots());
   };
 }
 
@@ -948,10 +1027,13 @@ async function openDetail(id){
         ${res.hab!==1?`<div class="muted" style="font-size:12px;margin-top:6px">Habitat multiplier: ×${res.hab.toFixed(2)}</div>`:''}
       </div>
       ${s.notes?`<div class="card" style="font-size:14px;line-height:1.55"><div style="font-weight:700;font-size:13px;margin-bottom:5px">Notes</div>${esc(s.notes).replace(/\n/g,'<br>')}</div>`:''}
-      <button class="btn ghost" id="editFromDetail" style="margin-top:4px">Edit spot</button>
+      <button class="btn" id="logFromDetail" style="margin-top:4px">🎣 Log a catch here</button>
+      <div style="height:8px"></div>
+      <button class="btn ghost" id="editFromDetail">Edit spot</button>
       <div style="height:8px"></div><button class="btn ghost" id="closeDetail">Close</button>
       <div class="src">Tides &amp; water temp: NOAA CO-OPS · weather/waves: Open-Meteo · habitat: FL FWC &amp; TX TPWD (oyster &amp; seagrass) · depth/structure: NCEI CUDEM ~3 m + NOAA ENC · solunar computed. Scores are a model — your local knowledge wins. Check conditions before heading out.</div>
       <div style="height:12px"></div>`;
+    document.getElementById('logFromDetail').onclick=()=>{bg.classList.remove('open');openLog({spotId:s.id,spotName:s.name,lat:s.lat,lng:s.lng,structure:s.structure,species:(s.species&&s.species[0])});};
     document.getElementById('editFromDetail').onclick=()=>{bg.classList.remove('open');openEdit(s.id)};
     document.getElementById('closeDetail').onclick=()=>bg.classList.remove('open');
   }catch(e){
@@ -1029,7 +1111,8 @@ async function buildSnapshot(){
       pressureMb:ctx.cur.pressure_msl!=null?Math.round(ctx.cur.pressure_msl):null, pressureTrend:trendTxt(ctx.pressTrendAt(new Date())),
       moon:ctx.moon.name, moonIllumPct:Math.round(ctx.moon.illum*100),
       tide: ctx.tide.pts.length?(slopeAt(ctx.tide,new Date())>0?'rising':'falling'):null },
-    spots: items
+    spots: items,
+    recentCatches: catches.slice(0,40).map(c=>({species:c.species,count:c.count,spot:c.spot_name,structure:c.structure,when:c.caught_at,conditions:c.conditions}))
   };
 }
 async function runPatternAgent(){
@@ -1047,6 +1130,78 @@ async function runPatternAgent(){
   btn.disabled=false;
 }
 function mdLite(t){return esc(t).replace(/^\s*[-*]\s+(.*)$/gm,'&bull;&nbsp;$1').replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/^#{1,6}\s*(.*)$/gm,'<b>$1</b>').replace(/\n/g,'<br>');}
+
+/* ============================ CATCH LOG ============================ */
+let logState=null;
+function openLog(o){
+  o=o||{};
+  const lc={lat:o.lat??map.getCenter().lat,lng:o.lng??map.getCenter().lng,spotId:o.spotId||null,spotName:o.spotName||null,structure:o.structure||null,count:1,species:o.species||null};
+  if(!lc.spotId){let best=null,bd=0.2;for(const s of spots){const d=hav(lc.lat,lc.lng,s.lat,s.lng);if(d<bd){bd=d;best=s;}}if(best){lc.spotId=best.id;lc.spotName=best.name;lc.structure=best.structure;lc.species=lc.species||(best.species&&best.species[0]);}}
+  logState=lc;
+  document.getElementById('logWhere').textContent=lc.spotName?('At '+lc.spotName):(`${lc.lat.toFixed(4)}, ${lc.lng.toFixed(4)} (map center)`);
+  document.getElementById('logCount').textContent='1';
+  document.getElementById('logLen').value='';document.getElementById('logBait').value='';document.getElementById('logNotes').value='';
+  const sp=document.getElementById('logSpecies');sp.innerHTML='';
+  SPECIES.forEach(s=>{const el=document.createElement('button');el.className='pick'+(lc.species===s?' on':'');el.textContent=s;el.onclick=()=>{sp.querySelectorAll('.pick').forEach(p=>p.classList.remove('on'));el.classList.add('on');logState.species=s;};sp.appendChild(el);});
+  document.getElementById('logBg').classList.add('open');
+}
+function renderCatches(){
+  const statsEl=document.getElementById('catchStats'),listEl=document.getElementById('catchList');
+  if(!catches.length){statsEl.innerHTML='';listEl.innerHTML='<div class="empty">No catches logged yet.<br>Land one, then tap “＋ Log catch” (or “Log a catch here” on a spot) — the app records the exact conditions for the AI to learn from.</div>';return;}
+  const total=catches.reduce((a,c)=>a+(c.count||1),0),byTide={},bySpecies={},byFeature={};
+  catches.forEach(c=>{const n=c.count||1,cd=c.conditions||{};if(cd.tide)byTide[cd.tide]=(byTide[cd.tide]||0)+n;bySpecies[c.species]=(bySpecies[c.species]||0)+n;const f=cd.bottom&&cd.bottom.feature;if(f)byFeature[f]=(byFeature[f]||0)+n;});
+  const topSp=Object.entries(bySpecies).sort((a,b)=>b[1]-a[1]).slice(0,4);
+  statsEl.innerHTML=`<div class="card"><div style="font-weight:800;margin-bottom:8px">${total} fish · ${catches.length} logs</div>
+    <div class="muted" style="font-size:13px;line-height:1.7">
+    Tide: <b>${byTide.falling||0}</b> falling · <b>${byTide.rising||0}</b> rising<br>
+    Species: ${topSp.map(([s,n])=>`${esc(s)} (${n})`).join(' · ')||'—'}
+    ${Object.keys(byFeature).length?'<br>Bottom: '+Object.entries(byFeature).sort((a,b)=>b[1]-a[1]).map(([f,n])=>`${esc(f)} ${n}`).join(' · '):''}</div></div>`;
+  listEl.innerHTML='';
+  catches.slice().sort((a,b)=>new Date(b.caught_at)-new Date(a.caught_at)).forEach(c=>{
+    const cd=c.conditions||{},d=new Date(c.caught_at);
+    const el=document.createElement('div');el.className='spot';
+    el.innerHTML=`<div class="ic">🐟</div>
+      <div style="flex:1;min-width:0"><div class="nm">${c.count>1?c.count+'× ':''}${esc(c.species)}${c.length_in?` · ${c.length_in}"`:''}</div>
+      <div class="meta">${esc(c.spot_name||'spot')} · ${d.toLocaleDateString([],{month:'short',day:'numeric'})} ${fmtDate(d)}${cd.tide?' · '+cd.tide:''}${cd.waterTempF!=null?' · '+cd.waterTempF+'°':''}${cd.bottom&&cd.bottom.feature?' · '+cd.bottom.feature:''}</div></div>
+      <button data-del="${c.id}" style="border:none;background:none;color:var(--muted);font-size:17px;padding:6px 4px">✕</button>`;
+    el.querySelector('[data-del]').onclick=(e)=>{e.stopPropagation();if(confirm('Delete this catch?')){removeCatch(c.id);catches=catches.filter(x=>x.id!==c.id);saveCatches();renderCatches();}};
+    listEl.appendChild(el);
+  });
+}
+async function runCatchAgent(){
+  const out=document.getElementById('catchAgentOut'),btn=document.getElementById('btnCatchAgent');
+  if(catches.length<2){out.innerHTML='<div class="muted" style="font-size:13px;margin-top:8px">Log a few catches first — I need a handful to find real patterns.</div>';return;}
+  btn.disabled=true;out.innerHTML='<div class="ld">🧠 Studying your catches…</div>';
+  try{
+    const payload={ area:"Port O'Connor, TX",
+      catches:catches.slice(0,80).map(c=>({species:c.species,count:c.count,length_in:c.length_in,spot:c.spot_name,structure:c.structure,bait:c.bait,when:c.caught_at,conditions:c.conditions})),
+      savedSpots:spots.map(s=>({name:s.name,structure:labelFor(s.structure),species:s.species})) };
+    const r=await fetch(AGENT_URL,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+SB_ANON,'apikey':SB_ANON},
+      body:JSON.stringify({instruction:"These are the angler's ACTUAL logged catches, each with the exact conditions captured at the moment of the catch. Find VALIDATED patterns specific to this angler: which tide stage, water-temp range, bottom feature/structure, moon, time of day, and bait actually produce fish. Quantify it (e.g. 'X of Y fish came on the falling tide'). Flag the single strongest pattern, any spot that consistently produces or disappoints, and give one specific recommendation for the next trip. Use real counts from the data; if there isn't enough data to be confident, say so plainly.",payload})}).then(r=>r.json());
+    if(r&&r.error)out.innerHTML=`<div class="empty" style="padding:14px 4px">${esc(r.error)}</div>`;
+    else out.innerHTML=`<div style="font-size:14px;line-height:1.6;margin-top:6px">${mdLite(r.text||'(no response)')}</div><div class="src">From your ${catches.length} logged catches via Ollama (${esc(r.model||'')}). The more you log, the sharper this gets.</div>`;
+  }catch(e){out.innerHTML=`<div class="empty" style="padding:14px 4px">Couldn't reach the AI. ${esc(e.message||'')}</div>`;}
+  btn.disabled=false;
+}
+document.getElementById('btnLogCatch').onclick=()=>openLog({});
+document.getElementById('btnCatchAgent').onclick=runCatchAgent;
+document.getElementById('logPlus').onclick=()=>{if(logState){logState.count++;document.getElementById('logCount').textContent=logState.count;}};
+document.getElementById('logMinus').onclick=()=>{if(logState){logState.count=Math.max(1,logState.count-1);document.getElementById('logCount').textContent=logState.count;}};
+document.getElementById('logCancel').onclick=()=>document.getElementById('logBg').classList.remove('open');
+document.getElementById('logBg').onclick=e=>{if(e.target.id==='logBg')e.currentTarget.classList.remove('open')};
+document.getElementById('logSave').onclick=async()=>{
+  const lc=logState;if(!lc)return;
+  if(!lc.species)return toast('Pick a species');
+  const btn=document.getElementById('logSave');btn.disabled=true;btn.textContent='Capturing conditions…';
+  const len=parseFloat(document.getElementById('logLen').value)||null;
+  const bait=document.getElementById('logBait').value.trim()||null;
+  const notes=document.getElementById('logNotes').value.trim()||null;
+  let cond={};try{cond=await snapshotAt(lc.lat,lc.lng,lc.structure,[lc.species],lc.spotId||undefined);}catch(e){}
+  const cat={id:uid(),spot_id:lc.spotId,spot_name:lc.spotName,lat:lc.lat,lng:lc.lng,species:lc.species,count:lc.count,length_in:len,bait,notes,structure:lc.structure,conditions:cond,caught_at:new Date().toISOString()};
+  catches.unshift(cat);saveCatches();pushCatch(cat);
+  document.getElementById('logBg').classList.remove('open');toast('Catch logged 🎣');renderCatches();
+  btn.disabled=false;btn.textContent='Save catch';logState=null;
+};
 
 /* ============================ DATA HELPERS ============================ */
 let _tideStations=null,_wtStations=null;
@@ -1108,8 +1263,9 @@ function sizeMap(){const el=document.getElementById('map');if(!el)return;const t
 sizeMap();window.addEventListener('resize',sizeMap);window.addEventListener('load',sizeMap);window.addEventListener('orientationchange',()=>setTimeout(sizeMap,250));
 async function boot(lat,lng,label){
   loadHeader(lat,lng,label);
-  const cloud=await pullSpots().catch(()=>null);   // localStorage already painted; replace with cloud if available
+  const [cloud,cloudC]=await Promise.all([pullSpots().catch(()=>null),pullCatches().catch(()=>null)]); // localStorage already painted
   if(cloud){spots=cloud;save();refreshMarkers();}
+  if(cloudC){catches=cloudC;saveCatches();}
   renderSpots();
   await scoreAllSpots(); renderSpots();
 }
