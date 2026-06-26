@@ -264,6 +264,8 @@
   <div style="height:6px"></div>
   <button class="btn" id="logSave">Save catch</button>
   <div style="height:8px"></div>
+  <button class="btn ghost" id="logBlank">🚫 No fish — log this slow session</button>
+  <div style="height:8px"></div>
   <button class="btn ghost" id="logCancel">Cancel</button>
   <div style="height:10px"></div>
 </div></div></div>
@@ -307,12 +309,12 @@ const LSC='saltspots.catches.v1';
 let catches=loadCatches();
 function loadCatches(){try{return JSON.parse(localStorage.getItem(LSC))||[]}catch(e){return[]}}
 function saveCatches(){localStorage.setItem(LSC,JSON.stringify(catches))}
-function catchRow(c){return {id:c.id,sync_code:syncCode,spot_id:c.spot_id,spot_name:c.spot_name,lat:c.lat,lng:c.lng,species:c.species,count:c.count,length_in:c.length_in,bait:c.bait,notes:c.notes,structure:c.structure,conditions:c.conditions,caught_at:c.caught_at};}
+function catchRow(c){return {id:c.id,sync_code:syncCode,kind:c.kind||'catch',spot_id:c.spot_id,spot_name:c.spot_name,lat:c.lat,lng:c.lng,species:c.species,count:c.count,length_in:c.length_in,bait:c.bait,notes:c.notes,structure:c.structure,conditions:c.conditions,caught_at:c.caught_at};}
 async function pullCatches(){
   if(!sb)return null;
   const {data,error}=await sb.from('salt_catches').select('*').eq('sync_code',syncCode).order('caught_at',{ascending:false});
   if(error){console.warn('pullC',error.message);return null;}
-  return data.map(r=>({id:r.id,spot_id:r.spot_id,spot_name:r.spot_name,lat:r.lat,lng:r.lng,species:r.species,count:r.count,length_in:r.length_in,bait:r.bait,notes:r.notes,structure:r.structure,conditions:r.conditions||{},caught_at:r.caught_at}));
+  return data.map(r=>({id:r.id,kind:r.kind||'catch',spot_id:r.spot_id,spot_name:r.spot_name,lat:r.lat,lng:r.lng,species:r.species,count:r.count,length_in:r.length_in,bait:r.bait,notes:r.notes,structure:r.structure,conditions:r.conditions||{},caught_at:r.caught_at}));
 }
 async function pushCatch(c){if(!sb)return;const {error}=await sb.from('salt_catches').upsert(catchRow(c));if(error)console.warn('pushC',error.message);}
 async function removeCatch(id){if(!sb)return;await sb.from('salt_catches').delete().eq('id',id);}
@@ -1112,7 +1114,7 @@ async function buildSnapshot(){
       moon:ctx.moon.name, moonIllumPct:Math.round(ctx.moon.illum*100),
       tide: ctx.tide.pts.length?(slopeAt(ctx.tide,new Date())>0?'rising':'falling'):null },
     spots: items,
-    recentCatches: catches.slice(0,40).map(c=>({species:c.species,count:c.count,spot:c.spot_name,structure:c.structure,when:c.caught_at,conditions:c.conditions}))
+    recentCatches: catches.slice(0,40).map(c=>({kind:c.kind||'catch',species:c.species,count:c.count,spot:c.spot_name,structure:c.structure,when:c.caught_at,conditions:c.conditions}))
   };
 }
 async function runPatternAgent(){
@@ -1147,24 +1149,29 @@ function openLog(o){
 }
 function renderCatches(){
   const statsEl=document.getElementById('catchStats'),listEl=document.getElementById('catchList');
-  if(!catches.length){statsEl.innerHTML='';listEl.innerHTML='<div class="empty">No catches logged yet.<br>Land one, then tap “＋ Log catch” (or “Log a catch here” on a spot) — the app records the exact conditions for the AI to learn from.</div>';return;}
-  const total=catches.reduce((a,c)=>a+(c.count||1),0),byTide={},bySpecies={},byFeature={};
-  catches.forEach(c=>{const n=c.count||1,cd=c.conditions||{};if(cd.tide)byTide[cd.tide]=(byTide[cd.tide]||0)+n;bySpecies[c.species]=(bySpecies[c.species]||0)+n;const f=cd.bottom&&cd.bottom.feature;if(f)byFeature[f]=(byFeature[f]||0)+n;});
+  if(!catches.length){statsEl.innerHTML='';listEl.innerHTML='<div class="empty">No catches logged yet.<br>Land one, then tap “＋ Log catch” (or “Log a catch here” on a spot) — the app records the exact conditions for the AI to learn from. You can also log a slow session so it learns what <i>doesn’t</i> work.</div>';return;}
+  const fish=c=>c.kind==='blank'?0:(c.count||1);
+  const totalFish=catches.reduce((a,c)=>a+fish(c),0), blanks=catches.filter(c=>c.kind==='blank').length, sessions=catches.length;
+  const bySpecies={},byTideFish={rising:0,falling:0},byTideSess={rising:0,falling:0},byFeature={};
+  catches.forEach(c=>{const n=fish(c),cd=c.conditions||{};
+    if(c.kind!=='blank')bySpecies[c.species]=(bySpecies[c.species]||0)+n;
+    if(cd.tide){byTideFish[cd.tide]=(byTideFish[cd.tide]||0)+n;byTideSess[cd.tide]=(byTideSess[cd.tide]||0)+1;}
+    const f=cd.bottom&&cd.bottom.feature;if(f&&c.kind!=='blank')byFeature[f]=(byFeature[f]||0)+n;});
   const topSp=Object.entries(bySpecies).sort((a,b)=>b[1]-a[1]).slice(0,4);
-  statsEl.innerHTML=`<div class="card"><div style="font-weight:800;margin-bottom:8px">${total} fish · ${catches.length} logs</div>
+  statsEl.innerHTML=`<div class="card"><div style="font-weight:800;margin-bottom:8px">${totalFish} fish · ${sessions} sessions${blanks?` · ${blanks} slow`:''}</div>
     <div class="muted" style="font-size:13px;line-height:1.7">
-    Tide: <b>${byTide.falling||0}</b> falling · <b>${byTide.rising||0}</b> rising<br>
+    Falling: <b>${byTideFish.falling||0}</b> fish / ${byTideSess.falling||0} trips · Rising: <b>${byTideFish.rising||0}</b> fish / ${byTideSess.rising||0} trips<br>
     Species: ${topSp.map(([s,n])=>`${esc(s)} (${n})`).join(' · ')||'—'}
     ${Object.keys(byFeature).length?'<br>Bottom: '+Object.entries(byFeature).sort((a,b)=>b[1]-a[1]).map(([f,n])=>`${esc(f)} ${n}`).join(' · '):''}</div></div>`;
   listEl.innerHTML='';
   catches.slice().sort((a,b)=>new Date(b.caught_at)-new Date(a.caught_at)).forEach(c=>{
-    const cd=c.conditions||{},d=new Date(c.caught_at);
+    const cd=c.conditions||{},d=new Date(c.caught_at),blank=c.kind==='blank';
     const el=document.createElement('div');el.className='spot';
-    el.innerHTML=`<div class="ic">🐟</div>
-      <div style="flex:1;min-width:0"><div class="nm">${c.count>1?c.count+'× ':''}${esc(c.species)}${c.length_in?` · ${c.length_in}"`:''}</div>
+    el.innerHTML=`<div class="ic"${blank?' style="background:#eef1f3;filter:grayscale(1)"':''}>${blank?'🚫':'🐟'}</div>
+      <div style="flex:1;min-width:0"><div class="nm">${blank?'No fish':((c.count>1?c.count+'× ':'')+esc(c.species)+(c.length_in?` · ${c.length_in}"`:''))}</div>
       <div class="meta">${esc(c.spot_name||'spot')} · ${d.toLocaleDateString([],{month:'short',day:'numeric'})} ${fmtDate(d)}${cd.tide?' · '+cd.tide:''}${cd.waterTempF!=null?' · '+cd.waterTempF+'°':''}${cd.bottom&&cd.bottom.feature?' · '+cd.bottom.feature:''}</div></div>
       <button data-del="${c.id}" style="border:none;background:none;color:var(--muted);font-size:17px;padding:6px 4px">✕</button>`;
-    el.querySelector('[data-del]').onclick=(e)=>{e.stopPropagation();if(confirm('Delete this catch?')){removeCatch(c.id);catches=catches.filter(x=>x.id!==c.id);saveCatches();renderCatches();}};
+    el.querySelector('[data-del]').onclick=(e)=>{e.stopPropagation();if(confirm('Delete this entry?')){removeCatch(c.id);catches=catches.filter(x=>x.id!==c.id);saveCatches();renderCatches();}};
     listEl.appendChild(el);
   });
 }
@@ -1174,10 +1181,10 @@ async function runCatchAgent(){
   btn.disabled=true;out.innerHTML='<div class="ld">🧠 Studying your catches…</div>';
   try{
     const payload={ area:"Port O'Connor, TX",
-      catches:catches.slice(0,80).map(c=>({species:c.species,count:c.count,length_in:c.length_in,spot:c.spot_name,structure:c.structure,bait:c.bait,when:c.caught_at,conditions:c.conditions})),
+      catches:catches.slice(0,80).map(c=>({kind:c.kind||'catch',species:c.species,count:c.count,length_in:c.length_in,spot:c.spot_name,structure:c.structure,bait:c.bait,when:c.caught_at,conditions:c.conditions})),
       savedSpots:spots.map(s=>({name:s.name,structure:labelFor(s.structure),species:s.species})) };
     const r=await fetch(AGENT_URL,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+SB_ANON,'apikey':SB_ANON},
-      body:JSON.stringify({instruction:"These are the angler's ACTUAL logged catches, each with the exact conditions captured at the moment of the catch. Find VALIDATED patterns specific to this angler: which tide stage, water-temp range, bottom feature/structure, moon, time of day, and bait actually produce fish. Quantify it (e.g. 'X of Y fish came on the falling tide'). Flag the single strongest pattern, any spot that consistently produces or disappoints, and give one specific recommendation for the next trip. Use real counts from the data; if there isn't enough data to be confident, say so plainly.",payload})}).then(r=>r.json());
+      body:JSON.stringify({instruction:"These are the angler's logged fishing sessions with exact conditions captured at each. Entries with kind:'catch' produced fish (see count); entries with kind:'blank' mean they FISHED those conditions and caught NOTHING. Use both to find VALIDATED patterns and HIT RATES: which tide stage, water-temp range, bottom feature/structure, moon, time of day, and bait actually produce vs strike out for THIS angler. Quantify it (e.g. 'caught on 4 of 5 falling-tide trips, 0 of 3 rising'). Flag the single strongest pattern, any spot that consistently produces or disappoints, and give one specific recommendation for the next trip. If there isn't enough data to be confident, say so plainly.",payload})}).then(r=>r.json());
     if(r&&r.error)out.innerHTML=`<div class="empty" style="padding:14px 4px">${esc(r.error)}</div>`;
     else out.innerHTML=`<div style="font-size:14px;line-height:1.6;margin-top:6px">${mdLite(r.text||'(no response)')}</div><div class="src">From your ${catches.length} logged catches via Ollama (${esc(r.model||'')}). The more you log, the sharper this gets.</div>`;
   }catch(e){out.innerHTML=`<div class="empty" style="padding:14px 4px">Couldn't reach the AI. ${esc(e.message||'')}</div>`;}
@@ -1189,19 +1196,22 @@ document.getElementById('logPlus').onclick=()=>{if(logState){logState.count++;do
 document.getElementById('logMinus').onclick=()=>{if(logState){logState.count=Math.max(1,logState.count-1);document.getElementById('logCount').textContent=logState.count;}};
 document.getElementById('logCancel').onclick=()=>document.getElementById('logBg').classList.remove('open');
 document.getElementById('logBg').onclick=e=>{if(e.target.id==='logBg')e.currentTarget.classList.remove('open')};
-document.getElementById('logSave').onclick=async()=>{
+async function saveLog(kind){
   const lc=logState;if(!lc)return;
-  if(!lc.species)return toast('Pick a species');
-  const btn=document.getElementById('logSave');btn.disabled=true;btn.textContent='Capturing conditions…';
+  if(kind==='catch'&&!lc.species)return toast('Pick a species');
+  const save=document.getElementById('logSave'),blank=document.getElementById('logBlank');
+  save.disabled=blank.disabled=true;(kind==='catch'?save:blank).textContent='Capturing conditions…';
   const len=parseFloat(document.getElementById('logLen').value)||null;
   const bait=document.getElementById('logBait').value.trim()||null;
   const notes=document.getElementById('logNotes').value.trim()||null;
-  let cond={};try{cond=await snapshotAt(lc.lat,lc.lng,lc.structure,[lc.species],lc.spotId||undefined);}catch(e){}
-  const cat={id:uid(),spot_id:lc.spotId,spot_name:lc.spotName,lat:lc.lat,lng:lc.lng,species:lc.species,count:lc.count,length_in:len,bait,notes,structure:lc.structure,conditions:cond,caught_at:new Date().toISOString()};
+  let cond={};try{cond=await snapshotAt(lc.lat,lc.lng,lc.structure,lc.species?[lc.species]:[],lc.spotId||undefined);}catch(e){}
+  const cat={id:uid(),kind,spot_id:lc.spotId,spot_name:lc.spotName,lat:lc.lat,lng:lc.lng,species:lc.species||'(target unspecified)',count:kind==='catch'?lc.count:0,length_in:len,bait,notes,structure:lc.structure,conditions:cond,caught_at:new Date().toISOString()};
   catches.unshift(cat);saveCatches();pushCatch(cat);
-  document.getElementById('logBg').classList.remove('open');toast('Catch logged 🎣');renderCatches();
-  btn.disabled=false;btn.textContent='Save catch';logState=null;
-};
+  document.getElementById('logBg').classList.remove('open');toast(kind==='catch'?'Catch logged 🎣':'Slow session logged');renderCatches();
+  save.disabled=blank.disabled=false;save.textContent='Save catch';blank.textContent='🚫 No fish — log this slow session';logState=null;
+}
+document.getElementById('logSave').onclick=()=>saveLog('catch');
+document.getElementById('logBlank').onclick=()=>saveLog('blank');
 
 /* ============================ DATA HELPERS ============================ */
 let _tideStations=null,_wtStations=null;

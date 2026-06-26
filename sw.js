@@ -1,5 +1,5 @@
 /* Salt Spots service worker — offline app shell + best-effort data cache */
-const CACHE = 'saltspots-v7';
+const CACHE = 'saltspots-v8';
 const SHELL = [
   './', './index.html', './manifest.webmanifest',
   './icon-192.png', './icon-512.png', './apple-touch-icon.png',
