@@ -186,6 +186,15 @@
   <section id="tabToday" class="pad hidden">
     <div class="st"><h2>Today on the Water</h2></div>
     <div id="todayBody"></div>
+    <div class="card" id="agentCard">
+      <div class="row">
+        <div style="font-size:22px">🧠</div>
+        <div style="flex:1;min-width:0"><div style="font-weight:800">AI pattern finder</div>
+        <div class="muted" style="font-size:12px">Reads your spots + conditions and spots patterns</div></div>
+        <button class="btn sm" id="btnAgent" style="width:auto">Find patterns</button>
+      </div>
+      <div id="agentOut" style="margin-top:6px"></div>
+    </div>
   </section>
 </div>
 
@@ -234,6 +243,8 @@ const ctxCache={}, habCache={}, structCache={};
 /* ---- Supabase cloud sync (cross-device via a shared sync code) ---- */
 const SB_URL='https://xsnjxqruybhxdandcmol.supabase.co';
 const SB_KEY='sb_publishable_msOG_LBZ7XNX69w14ksCEQ_sYtmV8yD';
+const SB_ANON='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhzbmp4cXJ1eWJoeGRhbmRjbW9sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU2MDYxMDgsImV4cCI6MjA5MTE4MjEwOH0.Q3U6OUUQhIUieW1gRsfn1_ZUkdTwmm9nwFvk_vUO5Jg'; // anon JWT for Edge Function auth (public-safe)
+const AGENT_URL=SB_URL+'/functions/v1/ollama-agent';
 const sb=(window.supabase&&window.supabase.createClient)?window.supabase.createClient(SB_URL,SB_KEY):null;
 let syncCode=localStorage.getItem('saltspots.sync')||genSync();
 function genSync(){const c='POC-'+Math.random().toString(36).slice(2,7).toUpperCase();localStorage.setItem('saltspots.sync',c);return c;}
@@ -699,6 +710,7 @@ document.getElementById('btnOyster').onclick=()=>toggleHabitat('oyster');
 document.getElementById('btnGrass').onclick=()=>toggleHabitat('grass');
 document.getElementById('btnFind').onclick=suggestSpots;
 document.getElementById('btnDepth').onclick=toggleDepth;
+document.getElementById('btnAgent').onclick=runPatternAgent;
 
 /* Depth overlay — charted channels (dredged) + depth contours from NOAA ENC */
 async function toggleDepth(){
@@ -992,6 +1004,49 @@ async function renderToday(){
       <div class="src">Rating the water centered on your map (generic flat). Pan the map to plan a different area; tap a saved spot for structure- &amp; species-specific scoring.</div>`;
   }catch(e){body.innerHTML=`<div class="empty">Couldn't load. ${esc(e.message||'')}</div>`}
 }
+
+/* ============================ AI PATTERN AGENT (Ollama via Supabase proxy) ============================ */
+async function buildSnapshot(){
+  const c={lat:map.getCenter().lat,lng:map.getCenter().lng};
+  const ctx=await getContext(c.lat,c.lng);
+  const items=[];
+  for(const s of spots){
+    await Promise.all([ensureHabitat(s),ensureStructure(s)]);
+    const sc=await getContext(s.lat,s.lng),res=scoreAt(s,sc,new Date());
+    const st=structCache[s.id]||{},hb=habCache[s.id]||{},wins=bestWindows(s,sc).slice(0,2);
+    items.push({
+      name:s.name, structure:labelFor(s.structure), species:s.species||[], biteNow:res.score,
+      factors:Object.fromEntries(Object.entries(res.f).map(([k,v])=>[k,Math.round(v*100)])),
+      bottom: st.noData?null:{depthFt:st.depthFt!=null?+st.depthFt.toFixed(1):null,reliefFt:st.reliefFt!=null?+st.reliefFt.toFixed(1):null,feature:st.feature},
+      habitat: hb.tags||[],
+      bestWindows: wins.map(w=>({when:winSpan(w.start,w.end),peak:w.peak,why:w.reason}))
+    });
+  }
+  return {
+    area:"Port O'Connor / Matagorda & Espiritu Santo Bays, TX", localTime:new Date().toString(),
+    conditions:{ waterTempF:ctx.water, windMph:ctx.cur.wind_speed_10m!=null?Math.round(ctx.cur.wind_speed_10m):null,
+      windDir:ctx.cur.wind_direction_10m!=null?deg2c(ctx.cur.wind_direction_10m):null,
+      pressureMb:ctx.cur.pressure_msl!=null?Math.round(ctx.cur.pressure_msl):null, pressureTrend:trendTxt(ctx.pressTrendAt(new Date())),
+      moon:ctx.moon.name, moonIllumPct:Math.round(ctx.moon.illum*100),
+      tide: ctx.tide.pts.length?(slopeAt(ctx.tide,new Date())>0?'rising':'falling'):null },
+    spots: items
+  };
+}
+async function runPatternAgent(){
+  const out=document.getElementById('agentOut'),btn=document.getElementById('btnAgent');
+  if(!spots.length){out.innerHTML='<div class="muted" style="font-size:13px;margin-top:8px">Add a few spots first, then I can spot patterns across them.</div>';return;}
+  btn.disabled=true;out.innerHTML='<div class="ld">Gathering your spots & conditions…</div>';
+  try{
+    const payload=await buildSnapshot();
+    out.innerHTML='<div class="ld">🧠 Reading your spots…</div>';
+    const r=await fetch(AGENT_URL,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+SB_ANON,'apikey':SB_ANON},
+      body:JSON.stringify({instruction:"Find actionable patterns across these spots for planning the next couple days at Port O'Connor.",payload})}).then(r=>r.json());
+    if(r&&r.error)out.innerHTML=`<div class="empty" style="padding:14px 4px">${esc(r.error)}</div>`;
+    else out.innerHTML=`<div style="font-size:14px;line-height:1.6;margin-top:6px">${mdLite(r.text||'(no response)')}</div><div class="src">Generated by Ollama (${esc(r.model||'')}) from your spots' computed data. AI can be wrong — trust your eyes on the water.</div>`;
+  }catch(e){out.innerHTML=`<div class="empty" style="padding:14px 4px">Couldn't reach the AI service.<br><span class="muted">${esc(e.message||'')}</span></div>`;}
+  btn.disabled=false;
+}
+function mdLite(t){return esc(t).replace(/^\s*[-*]\s+(.*)$/gm,'&bull;&nbsp;$1').replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/^#{1,6}\s*(.*)$/gm,'<b>$1</b>').replace(/\n/g,'<br>');}
 
 /* ============================ DATA HELPERS ============================ */
 let _tideStations=null,_wtStations=null;
