@@ -173,6 +173,7 @@
         <button id="btnDepth">🌊 Depth</button>
       </div>
       <div class="legend"><span><span class="d" style="background:var(--green)"></span>Hot</span><span><span class="d" style="background:var(--amber)"></span>Fair</span><span><span class="d" style="background:var(--grey)"></span>Slow</span></div>
+      <div class="legend" id="depthLegend" style="left:auto;right:10px;bottom:10px;display:none">🌊 1-ft contours<span style="display:inline-block;width:46px;height:9px;border-radius:3px;background:linear-gradient(90deg,#d8efe2,#0a4f63);margin:0 5px"></span>deep</div>
       <div class="maphint">Tap the map to drop a spot</div>
     </div>
   </section>
@@ -791,21 +792,26 @@ document.getElementById('btnFind').onclick=suggestSpots;
 document.getElementById('btnDepth').onclick=toggleDepth;
 document.getElementById('btnAgent').onclick=runPatternAgent;
 
-/* Depth overlay — charted channels (dredged) + depth contours from NOAA ENC */
-async function toggleDepth(){
-  const btn=document.getElementById('btnDepth');
-  if(habLayers.depth){map.removeLayer(habLayers.depth);habLayers.depth=null;btn.classList.remove('on');return;}
-  if(map.getZoom()<12){toast('Zoom in closer to load depth');return;}
-  btn.classList.add('on');toast('Loading depth & channels…');
-  const b=map.getBounds(),bbox=`${b.getWest()},${b.getSouth()},${b.getEast()},${b.getNorth()}`;
-  try{
-    const enc=await fetchENC(bbox);
-    if(!enc.dredged.length&&!enc.contours.length){toast('No charted depth here');btn.classList.remove('on');return;}
-    const grp=L.featureGroup();
-    if(enc.contours.length)L.geoJSON({type:'FeatureCollection',features:enc.contours},{style:{color:'#2563eb',weight:1,opacity:.45,fill:false}}).addTo(grp);
-    if(enc.dredged.length)L.geoJSON({type:'FeatureCollection',features:enc.dredged},{style:{color:'#1d4ed8',weight:1.2,fillColor:'#3b82f6',fillOpacity:.32}}).bindTooltip('Dredged channel').addTo(grp);
-    grp.addTo(map);habLayers.depth=grp;
-  }catch(e){btn.classList.remove('on');toast('Depth data unavailable here')}
+/* Depth chart — shaded ~3 m CUDEM bathymetry + 1-ft contour lines (NCEI DEM_all) */
+let depthShade=null, depthContour=null, depthMover=null;
+let depthInterval=0.3048; // metres per contour line (0.3048 = 1 ft)
+const RR_SHADE=encodeURIComponent('{"rasterFunction":"ColorHillshade"}');
+function rrContour(){return encodeURIComponent(JSON.stringify({rasterFunction:'Contour',rasterFunctionArguments:{ContourInterval:depthInterval,ContourType:0,ZBase:0,NumberOfContours:0,ZFactor:1}}));}
+function demUrl(rr){
+  const b=map.getBounds(),crs=map.options.crs;
+  const sw=crs.project(b.getSouthWest()),ne=crs.project(b.getNorthEast()),size=map.getSize();
+  return `${DEM_ALL}/exportImage?bbox=${sw.x},${sw.y},${ne.x},${ne.y}&bboxSR=3857&imageSR=3857&size=${size.x},${size.y}&format=png&transparent=true&renderingRule=${rr}&f=image`;
+}
+function toggleDepth(){
+  const btn=document.getElementById('btnDepth'),leg=document.getElementById('depthLegend');
+  if(depthShade||depthContour){[depthShade,depthContour].forEach(l=>l&&map.removeLayer(l));depthShade=depthContour=null;if(depthMover)map.off('moveend',depthMover);btn.classList.remove('on');leg.style.display='none';return;}
+  if(map.getZoom()<11){toast('Zoom in to load the depth chart');return;}
+  btn.classList.add('on');leg.style.display='';toast('Loading 1-ft depth contours…');
+  const b=map.getBounds();
+  depthShade=L.imageOverlay(demUrl(RR_SHADE),b,{opacity:0.8,interactive:false}).addTo(map);
+  depthContour=L.imageOverlay(demUrl(rrContour()),b,{opacity:0.7,interactive:false}).addTo(map);
+  depthMover=()=>{const bb=map.getBounds();if(depthShade){depthShade.setUrl(demUrl(RR_SHADE));depthShade.setBounds(bb);}if(depthContour){depthContour.setUrl(demUrl(rrContour()));depthContour.setBounds(bb);}};
+  map.on('moveend',depthMover);
 }
 
 /* ---- Suggested spots: derive candidates from mapped habitat, score, rank ---- */
