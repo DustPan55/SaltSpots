@@ -57,6 +57,7 @@
     radial-gradient(160px 70px at 10% 100%, var(--aqua), transparent)}
   header .brand{font-size:23px;display:flex;align-items:center;gap:9px;position:relative}
   header .sub{opacity:.85;font-size:13px;margin-top:2px;position:relative}
+  .gear{position:absolute;top:14px;right:16px;z-index:3;width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.24);color:#fff;font-size:16px;display:grid;place-items:center}
   .strip{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:14px;position:relative}
   .chip{background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.18);border-radius:13px;padding:9px 6px;text-align:center}
   .chip .v{font-weight:800;font-size:16px;line-height:1.1}
@@ -156,6 +157,7 @@
 <div class="screen">
   <header>
     <div class="wave"></div>
+    <button class="gear" id="btnSettings" title="Settings">⚙️</button>
     <div class="brand">🎣 Salt Spots</div>
     <div class="sub" id="locLabel">Finding your water…</div>
     <div class="strip" id="liveStrip">
@@ -275,6 +277,27 @@
   <div style="height:10px"></div>
 </div></div></div>
 
+<div class="sheet-bg" id="setBg"><div class="sheet"><div class="grab"></div><div class="pad">
+  <h2 style="margin:2px 2px 12px">Settings</h2>
+  <div class="card">
+    <div class="row"><div style="flex:1;min-width:0"><div style="font-weight:700">App version</div>
+    <div class="muted" id="setVer" style="font-size:14px;font-family:ui-monospace,monospace"></div></div>
+    <button class="btn sm ghost" id="setCheck" style="width:auto">Check</button></div>
+    <div id="setUpd" style="font-size:13px;margin-top:9px"></div>
+  </div>
+  <div class="card">
+    <div style="font-weight:700;margin-bottom:3px">Sync code</div>
+    <div class="muted" style="font-size:12px;margin-bottom:9px">Enter the same code on another device to share spots &amp; catches.</div>
+    <div class="row"><div id="setSync" style="font-family:ui-monospace,monospace;font-weight:800;font-size:16px;letter-spacing:.05em;flex:1"></div>
+    <button class="btn sm ghost" id="setSyncBtn" style="width:auto">Change</button></div>
+  </div>
+  <button class="btn ghost" id="setForce">🔄 Force update (clear cache &amp; reload)</button>
+  <div class="src" style="margin-top:12px">Salt Spots · data: NOAA CO-OPS tides &amp; water temp, Open-Meteo, NCEI CUDEM bathymetry, NOAA ENC, FL FWC &amp; TX TPWD habitat, Ollama AI. Scores are guidance — verify on the water.</div>
+  <div style="height:10px"></div>
+  <button class="btn ghost" id="setClose">Close</button>
+  <div style="height:10px"></div>
+</div></div></div>
+
 <div class="toast" id="toast"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -282,6 +305,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
+const APP_VERSION='v11';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -989,16 +1013,48 @@ function renderSpots(){
   });
   wireSync();
 }
-function wireSync(){
-  const b=document.getElementById('syncBtn'); if(!b)return;
-  b.onclick=async()=>{
-    const c=prompt('Sync code — enter the same code on each device to share spots:',syncCode);
-    if(!c||!c.trim())return;
-    syncCode=c.trim().toUpperCase();localStorage.setItem('saltspots.sync',syncCode);
-    toast('Synced to '+syncCode);
-    const [cloud,cloudC]=await Promise.all([pullSpots(),pullCatches()]);spots=cloud||[];catches=cloudC||[];save();saveCatches();refreshMarkers();renderSpots();renderCatches();scoreAllSpots().then(()=>renderSpots());
-  };
+function wireSync(){const b=document.getElementById('syncBtn');if(b)b.onclick=changeSync;}
+async function changeSync(){
+  const c=prompt('Sync code — enter the same code on each device to share spots & catches:',syncCode);
+  if(!c||!c.trim())return;
+  syncCode=c.trim().toUpperCase();localStorage.setItem('saltspots.sync',syncCode);
+  toast('Synced to '+syncCode);
+  const sv=document.getElementById('setSync');if(sv)sv.textContent=syncCode;
+  const [cloud,cloudC]=await Promise.all([pullSpots(),pullCatches()]);spots=cloud||[];catches=cloudC||[];save();saveCatches();refreshMarkers();renderSpots();renderCatches();scoreAllSpots().then(()=>renderSpots());
 }
+
+/* ---- Settings panel ---- */
+function openSettings(){
+  document.getElementById('setVer').textContent=APP_VERSION;
+  document.getElementById('setSync').textContent=syncCode;
+  document.getElementById('setUpd').textContent='';
+  document.getElementById('setBg').classList.add('open');
+}
+async function checkUpdate(){
+  const el=document.getElementById('setUpd');el.textContent='Checking…';
+  try{
+    const html=await fetch('./index.html?cb='+Date.now(),{cache:'no-store'}).then(r=>r.text());
+    const m=html.match(/APP_VERSION\s*=\s*['"]([^'"]+)['"]/);
+    const latest=m&&m[1];
+    if(!latest){el.textContent='Couldn’t read the latest version.';return;}
+    if(latest===APP_VERSION)el.innerHTML='<b style="color:#0a7a52">✓ You’re on the latest ('+esc(latest)+')</b>';
+    else el.innerHTML='<b style="color:#b06a00">Update available: '+esc(latest)+'</b><br><span class="muted">Tap “Force update” below to get it.</span>';
+  }catch(e){el.textContent='Offline — can’t check right now.';}
+}
+async function forceRefresh(){
+  toast('Updating…');
+  try{
+    if('serviceWorker' in navigator){const rs=await navigator.serviceWorker.getRegistrations();await Promise.all(rs.map(r=>r.unregister()));}
+    if(window.caches){const ks=await caches.keys();await Promise.all(ks.map(k=>caches.delete(k)));}
+  }catch(e){}
+  location.reload();
+}
+document.getElementById('btnSettings').onclick=openSettings;
+document.getElementById('setClose').onclick=()=>document.getElementById('setBg').classList.remove('open');
+document.getElementById('setBg').onclick=e=>{if(e.target.id==='setBg')e.currentTarget.classList.remove('open')};
+document.getElementById('setCheck').onclick=checkUpdate;
+document.getElementById('setForce').onclick=forceRefresh;
+document.getElementById('setSyncBtn').onclick=changeSync;
 
 /* ============================ SPOT DETAIL ============================ */
 async function openDetail(id){
