@@ -289,7 +289,7 @@
 <div class="sheet-bg" id="detailBg"><div class="sheet"><div class="grab"></div><div class="pad" id="detailBody"></div></div></div>
 
 <div class="sheet-bg" id="logBg"><div class="sheet"><div class="grab"></div><div class="pad">
-  <h2 style="margin:2px 2px 2px">Log a Catch</h2>
+  <h2 id="logTitle" style="margin:2px 2px 2px">Log a Catch</h2>
   <div class="muted" id="logWhere" style="font-size:12.5px;margin:0 2px"></div>
   <label class="fld">When</label>
   <input class="in" id="logWhen" type="datetime-local">
@@ -311,6 +311,7 @@
   <button class="btn" id="logSave">Save catch</button>
   <div style="height:8px"></div>
   <button class="btn ghost" id="logBlank">🚫 No fish — log this slow session</button>
+  <button class="btn ghost" id="logDelete" style="display:none">Delete this entry</button>
   <div style="height:8px"></div>
   <button class="btn ghost" id="logCancel">Cancel</button>
   <div style="height:10px"></div>
@@ -356,7 +357,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v23';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v24';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -1525,16 +1526,25 @@ function mdLite(t){return esc(t).replace(/^\s*[-*]\s+(.*)$/gm,'&bull;&nbsp;$1').
 let logState=null;
 function openLog(o){
   o=o||{};
-  const lc={lat:o.lat??map.getCenter().lat,lng:o.lng??map.getCenter().lng,spotId:o.spotId||null,spotName:o.spotName||null,structure:o.structure||null,count:1,species:o.species||null};
-  if(!lc.spotId){let best=null,bd=0.2;for(const s of spots){const d=hav(lc.lat,lc.lng,s.lat,s.lng);if(d<bd){bd=d;best=s;}}if(best){lc.spotId=best.id;lc.spotName=best.name;lc.structure=best.structure;lc.species=lc.species||(best.species&&best.species[0]);}}
+  const ed=o.edit||null, lc=ed
+    ? {lat:ed.lat,lng:ed.lng,spotId:ed.spot_id||null,spotName:ed.spot_name||null,structure:ed.structure||null,count:ed.count||1,species:ed.kind==='blank'?null:ed.species,editId:ed.id,kind:ed.kind||'catch'}
+    : {lat:o.lat??map.getCenter().lat,lng:o.lng??map.getCenter().lng,spotId:o.spotId||null,spotName:o.spotName||null,structure:o.structure||null,count:1,species:o.species||null,editId:null,kind:'catch'};
+  if(!ed&&!lc.spotId){let best=null,bd=0.2;for(const s of spots){const d=hav(lc.lat,lc.lng,s.lat,s.lng);if(d<bd){bd=d;best=s;}}if(best){lc.spotId=best.id;lc.spotName=best.name;lc.structure=best.structure;lc.species=lc.species||(best.species&&best.species[0]);}}
   logState=lc;
-  document.getElementById('logWhere').textContent=lc.spotName?('At '+lc.spotName):(`${lc.lat.toFixed(4)}, ${lc.lng.toFixed(4)} (map center)`);
-  document.getElementById('logCount').textContent='1';
-  const now=new Date(),tzNow=new Date(now.getTime()-now.getTimezoneOffset()*6e4).toISOString().slice(0,16);
-  document.getElementById('logWhen').value=tzNow; document.getElementById('logWhen').max=tzNow;
-  document.getElementById('logLen').value='';document.getElementById('logBait').value='';document.getElementById('logNotes').value='';
+  document.getElementById('logTitle').textContent=ed?(ed.kind==='blank'?'Edit Session':'Edit Catch'):'Log a Catch';
+  document.getElementById('logWhere').textContent=lc.spotName?('At '+lc.spotName):(`${lc.lat.toFixed(4)}, ${lc.lng.toFixed(4)}${ed?'':' (map center)'}`);
+  document.getElementById('logCount').textContent=lc.count;
+  const wd=ed&&ed.caught_at?new Date(ed.caught_at):new Date(), now=new Date();
+  document.getElementById('logWhen').value=new Date(wd.getTime()-wd.getTimezoneOffset()*6e4).toISOString().slice(0,16);
+  document.getElementById('logWhen').max=new Date(now.getTime()-now.getTimezoneOffset()*6e4).toISOString().slice(0,16);
+  document.getElementById('logLen').value=ed&&ed.length_in!=null?ed.length_in:'';
+  document.getElementById('logBait').value=ed&&ed.bait?ed.bait:'';
+  document.getElementById('logNotes').value=ed&&ed.notes?ed.notes:'';
   const sp=document.getElementById('logSpecies');sp.innerHTML='';
   SPECIES.forEach(s=>{const el=document.createElement('button');el.className='pick'+(lc.species===s?' on':'');el.textContent=s;el.onclick=()=>{sp.querySelectorAll('.pick').forEach(p=>p.classList.remove('on'));el.classList.add('on');logState.species=s;};sp.appendChild(el);});
+  document.getElementById('logBlank').style.display=ed?'none':'';
+  document.getElementById('logSave').textContent=ed?'Save changes':'Save catch';
+  document.getElementById('logDelete').style.display=ed?'':'none';
   document.getElementById('logBg').classList.add('open');
 }
 function renderCatches(){
@@ -1561,7 +1571,8 @@ function renderCatches(){
       <div style="flex:1;min-width:0"><div class="nm">${blank?'No fish':((c.count>1?c.count+'× ':'')+esc(c.species)+(c.length_in?` · ${c.length_in}"`:''))}</div>
       <div class="meta">${esc(c.spot_name||'spot')} · ${d.toLocaleDateString([],{month:'short',day:'numeric'})} ${fmtDate(d)}${cd.tide?' · '+cd.tide:''}${cd.waterTempF!=null?' · '+cd.waterTempF+'°':''}${cd.bottom&&cd.bottom.feature?' · '+cd.bottom.feature:''}</div></div>
       <button data-del="${c.id}" style="border:none;background:none;color:var(--muted);font-size:17px;padding:6px 4px">✕</button>`;
-    el.querySelector('[data-del]').onclick=(e)=>{e.stopPropagation();if(confirm('Delete this entry?')){removeCatch(c.id);catches=catches.filter(x=>x.id!==c.id);saveCatches();renderCatches();}};
+    el.querySelector('[data-del]').onclick=(e)=>{e.stopPropagation();if(confirm('Delete this entry?')){removeCatch(c.id);catches=catches.filter(x=>x.id!==c.id);saveCatches();renderCatches();calibrateWeights();}};
+    el.onclick=()=>openLog({edit:c}); el.style.cursor='pointer';
     listEl.appendChild(el);
   });
 }
@@ -1588,23 +1599,38 @@ document.getElementById('logCancel').onclick=()=>document.getElementById('logBg'
 document.getElementById('logBg').onclick=e=>{if(e.target.id==='logBg')e.currentTarget.classList.remove('open')};
 async function saveLog(kind){
   const lc=logState;if(!lc)return;
-  if(kind==='catch'&&!lc.species)return toast('Pick a species');
+  const eff=lc.editId?(lc.kind||'catch'):kind; // editing keeps the entry's kind
+  if(eff==='catch'&&!lc.species)return toast('Pick a species');
   const save=document.getElementById('logSave'),blank=document.getElementById('logBlank');
-  save.disabled=blank.disabled=true;(kind==='catch'?save:blank).textContent='Capturing conditions…';
+  save.disabled=blank.disabled=true;save.textContent='Capturing conditions…';
   const len=parseFloat(document.getElementById('logLen').value)||null;
   const bait=document.getElementById('logBait').value.trim()||null;
   const notes=document.getElementById('logNotes').value.trim()||null;
   const wv=document.getElementById('logWhen').value; let when=wv?new Date(wv):new Date(); if(isNaN(when)||when>new Date())when=new Date();
-  const back=(Date.now()-when.getTime())>2*36e5;
-  if(back)(kind==='catch'?save:blank).textContent='Fetching that day…';
+  if((Date.now()-when.getTime())>2*36e5)save.textContent='Fetching that day…';
   let cond={};try{cond=await snapshotAt(lc.lat,lc.lng,lc.structure,lc.species?[lc.species]:[],lc.spotId||undefined,when);}catch(e){}
-  const cat={id:uid(),kind,spot_id:lc.spotId,spot_name:lc.spotName,lat:lc.lat,lng:lc.lng,species:lc.species||'(target unspecified)',count:kind==='catch'?lc.count:0,length_in:len,bait,notes,structure:lc.structure,conditions:cond,caught_at:when.toISOString()};
-  catches.unshift(cat);saveCatches();pushCatch(cat);calibrateWeights();scoreAllSpots().then(()=>renderSpots());
-  document.getElementById('logBg').classList.remove('open');toast(kind==='catch'?'Catch logged 🎣':'Slow session logged');renderCatches();
+  if(lc.editId){
+    const idx=catches.findIndex(x=>x.id===lc.editId), ex=catches[idx]||{};
+    const cat={...ex,kind:eff,spot_id:lc.spotId,spot_name:lc.spotName,lat:lc.lat,lng:lc.lng,species:lc.species||ex.species||'(target unspecified)',count:eff==='catch'?lc.count:0,length_in:len,bait,notes,structure:lc.structure,conditions:cond,caught_at:when.toISOString()};
+    if(idx>=0)catches[idx]=cat; else catches.unshift(cat);
+    saveCatches();pushCatch(cat);
+    document.getElementById('logBg').classList.remove('open');toast('Catch updated');
+  }else{
+    const cat={id:uid(),kind:eff,spot_id:lc.spotId,spot_name:lc.spotName,lat:lc.lat,lng:lc.lng,species:lc.species||'(target unspecified)',count:eff==='catch'?lc.count:0,length_in:len,bait,notes,structure:lc.structure,conditions:cond,caught_at:when.toISOString()};
+    catches.unshift(cat);saveCatches();pushCatch(cat);
+    document.getElementById('logBg').classList.remove('open');toast(eff==='catch'?'Catch logged 🎣':'Slow session logged');
+  }
+  calibrateWeights();scoreAllSpots().then(()=>renderSpots());renderCatches();
   save.disabled=blank.disabled=false;save.textContent='Save catch';blank.textContent='🚫 No fish — log this slow session';logState=null;
 }
 document.getElementById('logSave').onclick=()=>saveLog('catch');
 document.getElementById('logBlank').onclick=()=>saveLog('blank');
+document.getElementById('logDelete').onclick=()=>{
+  const lc=logState;if(!lc||!lc.editId)return;
+  if(!confirm('Delete this entry?'))return;
+  removeCatch(lc.editId);catches=catches.filter(x=>x.id!==lc.editId);saveCatches();
+  document.getElementById('logBg').classList.remove('open');toast('Entry deleted');calibrateWeights();renderCatches();scoreAllSpots().then(()=>renderSpots());logState=null;
+};
 
 /* ============================ DATA HELPERS ============================ */
 let _tideStations=null,_wtStations=null;
