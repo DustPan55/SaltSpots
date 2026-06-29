@@ -159,6 +159,25 @@
   .pin span{transform:rotate(45deg);font-size:11px;font-weight:800;color:#fff}
   .toast{position:fixed;left:50%;bottom:96px;transform:translateX(-50%) translateY(20px);background:var(--ink);color:#fff;padding:11px 18px;border-radius:12px;font-size:14px;font-weight:600;z-index:1100;opacity:0;transition:.25s;box-shadow:var(--shadow-lg);max-width:90%;text-align:center}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+  /* ---------- desktop / full-browser layout (≥980px) ---------- */
+  @media (min-width:980px){
+    body{display:grid;grid-template-columns:1fr 440px;grid-template-rows:auto auto 1fr;height:100vh;overflow:hidden}
+    .screen{display:contents}
+    header{grid-column:1 / -1;grid-row:1}
+    #tabMap{grid-column:1;grid-row:2 / 4;display:block!important}
+    .mapwrap{height:100%}
+    #map{height:100%!important}
+    .nav{position:static;grid-column:2;grid-row:2;max-width:none;width:auto;margin:0;border-top:none;border-bottom:1px solid var(--line);background:#fff}
+    .nav button[data-tab="Map"]{display:none}
+    .nav button{padding:13px 0 14px}
+    #tabSpots,#tabCatches,#tabToday{grid-column:2;grid-row:3;overflow-y:auto;background:var(--bg);border-left:1px solid var(--line)}
+    .fab{display:grid!important;right:calc(440px + 20px);bottom:26px}
+    .sheet-bg{align-items:center}
+    .sheet{max-width:560px;border-radius:18px;max-height:86vh;transform:translateY(14px)}
+    .sheet-bg.open .sheet{transform:translateY(0)}
+    .reposbar{left:auto;right:calc(440px + 16px);width:360px}
+  }
 </style>
 </head>
 <body>
@@ -327,7 +346,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v18';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v19';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -1529,8 +1548,11 @@ async function loadHeader(lat,lng,label){
 /* ============================ BOOT ============================ */
 initMap();renderSpots();
 if(localStorage.getItem('saltspots.base')==='sat')toggleSat(); // restore saved base map
+if(window.innerWidth>=980){const sb=document.querySelector('.nav button[data-tab="Spots"]');if(sb)sb.click();} // desktop: map always shown, open Spots panel
 // size the map to fill the space between header and bottom nav
-function sizeMap(){const el=document.getElementById('map');if(!el)return;const top=el.getBoundingClientRect().top+window.scrollY;const navH=(document.querySelector('.nav')||{}).offsetHeight||60;el.style.height=Math.max(300,window.innerHeight-top-navH)+'px';if(map)map.invalidateSize();}
+function sizeMap(){const el=document.getElementById('map');if(!el)return;
+  if(window.innerWidth>=980){el.style.height='';if(map)map.invalidateSize();return;} // desktop: CSS handles height
+  const top=el.getBoundingClientRect().top+window.scrollY;const navH=(document.querySelector('.nav')||{}).offsetHeight||60;el.style.height=Math.max(300,window.innerHeight-top-navH)+'px';if(map)map.invalidateSize();}
 sizeMap();window.addEventListener('resize',sizeMap);window.addEventListener('load',sizeMap);window.addEventListener('orientationchange',()=>setTimeout(sizeMap,250));
 async function boot(lat,lng,label){
   loadHeader(lat,lng,label);
