@@ -307,6 +307,12 @@
     <div class="row"><div id="setSync" style="font-family:ui-monospace,monospace;font-weight:800;font-size:16px;letter-spacing:.05em;flex:1"></div>
     <button class="btn sm ghost" id="setSyncBtn" style="width:auto">Change</button></div>
   </div>
+  <div class="card">
+    <div style="font-weight:700;margin-bottom:3px">Model calibration</div>
+    <div class="muted" style="font-size:12px;margin-bottom:8px">The engine tunes its weights toward what your catches vs. slow sessions show.</div>
+    <div id="setCalib" style="font-size:13px"></div>
+    <div style="height:8px"></div><button class="btn sm ghost" id="setCalibReset" style="width:auto">Reset to defaults</button>
+  </div>
   <button class="btn ghost" id="setForce">🔄 Force update (clear cache &amp; reload)</button>
   <div class="src" style="margin-top:12px">Salt Spots · data: NOAA CO-OPS tides &amp; water temp, Open-Meteo, NCEI CUDEM bathymetry, NOAA ENC, FL FWC &amp; TX TPWD habitat, imagery © Esri, Ollama AI. Scores are guidance — verify on the water.</div>
   <div style="height:10px"></div>
@@ -321,7 +327,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v15';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v16';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -390,6 +396,22 @@ const scoreColor=s=>s==null?'#94a3b8':s>=72?'#10b981':s>=52?'#f59e0b':'#94a3b8';
    Transparent weighted model. Every factor returns 0..1; weights sum ~1.
    ==================================================================== */
 const WEIGHTS={tideMove:.22,tideStage:.16,water:.13,timeOfDay:.13,solunar:.09,wind:.07,pressure:.06,structure:.14};
+/* Calibration: nudge weights toward the factors that separate the user's catches from blanks. */
+let calibWeights=null; try{calibWeights=JSON.parse(localStorage.getItem('saltspots.weights'))||null;}catch(e){}
+function calibrateWeights(){
+  const rows=(typeof catches!=='undefined'?catches:[]).filter(c=>c.conditions&&c.conditions.factors).map(c=>({f:c.conditions.factors,y:c.kind==='blank'?0:1}));
+  const pos=rows.filter(r=>r.y===1), neg=rows.filter(r=>r.y===0);
+  if(pos.length<4||neg.length<2){calibWeights=null;localStorage.removeItem('saltspots.weights');return {ok:false,catches:pos.length,blanks:neg.length};}
+  const keys=Object.keys(WEIGHTS), lambda=Math.min(1,rows.length/30), out={}; let total=0;
+  for(const k of keys){
+    const mc=pos.reduce((a,r)=>a+(r.f[k]??.5),0)/pos.length, mb=neg.reduce((a,r)=>a+(r.f[k]??.5),0)/neg.length;
+    out[k]=Math.max(WEIGHTS[k]*0.3, WEIGHTS[k]*(1+lambda*2*(mc-mb))); total+=out[k]; // mean(catch)-mean(blank) separation
+  }
+  for(const k of keys)out[k]/=total;
+  calibWeights=out; localStorage.setItem('saltspots.weights',JSON.stringify(out));
+  return {ok:true,n:rows.length,catches:pos.length,blanks:neg.length,weights:out};
+}
+function resetWeights(){calibWeights=null;localStorage.removeItem('saltspots.weights');}
 
 // structure -> preferred tide behaviour
 const STRUCT_TIDE={
@@ -426,6 +448,29 @@ function tempActivity(temp,species){
   }
   return clamp(best);
 }
+// monthly run/activity multiplier (Gulf coast), index 0=Jan..11=Dec
+const SPECIES_SEASON={
+  Redfish:[.85,.85,.9,1,1,.95,.9,.92,1,1.12,1.12,.95], Trout:[.8,.82,.95,1,1,.95,.85,.85,.95,1,.98,.88],
+  Snook:[.5,.5,.7,.9,1,1.1,1.1,1.05,1,.8,.6,.5], Tarpon:[.4,.4,.5,.7,1,1.1,1.1,1,.9,.7,.5,.4],
+  Flounder:[.7,.7,.78,.85,.85,.8,.8,.85,.95,1.15,1.1,.85], Sheepshead:[1.12,1.15,1.1,.92,.8,.7,.68,.7,.8,.9,1,1.1],
+  'Black drum':[1.05,1.12,1.15,1.05,.9,.85,.85,.85,.9,.95,1,1.05], Jack:[.6,.6,.72,.85,1,1.05,1.05,1,.95,.85,.7,.6],
+  'Mangrove snapper':[.6,.6,.72,.85,1,1.05,1.05,1,.95,.85,.7,.6], Cobia:[.6,.7,.9,1.1,1.1,.9,.8,.8,.9,.95,.8,.6]
+};
+function seasonMod(species,month){ if(!species||!species.length||month==null)return 1; let b=0; for(const s of species){const a=SPECIES_SEASON[s]; b=Math.max(b,a?a[month]:1);} return b||1; }
+function salinityMod(species,cfs){ // high freshwater inflow shifts the bite
+  if(cfs==null||!species||!species.length)return 1; const high=cfs>2500, vhigh=cfs>6000; let m=1;
+  for(const s of species){
+    if(s==='Trout'||s==='Sheepshead'||s==='Mangrove snapper'){ if(vhigh)m=Math.min(m,.8); else if(high)m=Math.min(m,.92); }
+    if(s==='Redfish'||s==='Black drum'){ if(high)m=Math.max(m,1.03); }
+  }
+  return m;
+}
+function waterScore(ctx,species){ // temp band × season × salinity × temp-trend
+  let v=tempActivity(ctx.water,species);
+  v*=seasonMod(species,ctx.month); v*=salinityMod(species,ctx.streamCfs);
+  if(ctx.tempTrendF!=null){ if(ctx.tempTrendF>3)v*=1.06; else if(ctx.tempTrendF<-5)v*=.82; else if(ctx.tempTrendF<-2)v*=.92; }
+  return clamp(v);
+}
 
 // ---- tide helpers over a multi-day 30-min curve ----
 function heightAt(tide,t){
@@ -440,16 +485,19 @@ function slopeAt(tide,t){ // ft per hour
   const a=heightAt(tide,new Date(t.getTime()-h)),b=heightAt(tide,new Date(t.getTime()+h));
   if(a==null||b==null)return 0; return (b-a)/2;
 }
-function tideMoveScore(tide,t){
+function tideMoveScore(tide,t,ctx){
   if(!tide.pts.length||!tide.maxSlope)return .55;
-  return clamp(Math.abs(slopeAt(tide,t))/tide.maxSlope);
+  let m=Math.abs(slopeAt(tide,t))/tide.maxSlope;
+  if(ctx&&ctx.windTideFt!=null){const w=Math.min(Math.abs(ctx.windTideFt)/1.5,1)*0.25; m=m+w*(1-m);} // wind pushes water = extra flow
+  return clamp(m);
 }
-function tideStageScore(struct,tide,t){
+function tideStageScore(struct,tide,t,ctx){
   if(!tide.pts.length)return .6;
   const pref=STRUCT_TIDE[struct]||{phase:'any'};
   const rising=slopeAt(tide,t)>0;
   const h=heightAt(tide,t);
-  const pos=tide.range?clamp((h-tide.minV)/tide.range):.5; // 0 low .. 1 high
+  let pos=tide.range?clamp((h-tide.minV)/tide.range):.5; // 0 low .. 1 high
+  if(ctx&&ctx.windTideFt!=null&&tide.range)pos=clamp(pos+ctx.windTideFt/tide.range*0.7); // wind tide raises/lowers effective level
   let s=.6;
   if(pref.phase==='falling')s=rising?.35:.85;
   else if(pref.phase==='rising')s=rising?.85:.4;
@@ -467,6 +515,8 @@ function timeOfDayScore(ctx,t,species){
   let base=.42;
   if(hr>=10&&hr<=16)base=ctx.summer?.3:.5;            // midday: tough in heat
   if(isNight)base=(species&&(species.includes('Snook')||species.includes('Tarpon')))?.6:.35;
+  const cloud=ctx.cloudAt?ctx.cloudAt(t):null;
+  if(cloud!=null&&cloud>65)base=Math.max(base,ctx.summer?.55:.62); // overcast = extended low-light bite
   return clamp(Math.max(golden,base));
 }
 
@@ -487,11 +537,12 @@ function windScore(mph){
   if(mph<3)return .68; if(mph<=14)return 1-(Math.abs(mph-9)/14)*.18;
   if(mph<=20)return lerp(.8,.35,(mph-14)/6); return .2;
 }
-function pressureScore(ctx,t){
-  const tr=ctx.pressTrendAt(t), p=ctx.pressAt(t);
+function pressureScore(ctx,t){ // pressure + frontal dynamics
+  const p=ctx.pressAt(t), tr=ctx.pressTrendAt(t), tr24=ctx.pressTrend24At?ctx.pressTrend24At(t):null;
   let s=.6;
-  if(tr!=null){ if(tr<-.4&&tr>-2.5)s=.92; else if(tr<=-2.5)s=.7; else if(tr>.6)s=.45; }
-  if(p!=null&&p>1024&&(tr==null||tr>=0))s=Math.min(s,.42);          // bluebird high
+  if(tr!=null){ if(tr<-.4&&tr>-3)s=.9; else if(tr<=-3)s=.72; else if(tr>.6)s=.45; } // falling = pre-front feed
+  if(tr24!=null){ if(tr24<-4)s=Math.max(s,.85); if(tr24>4&&p!=null&&p>1020)s=Math.min(s,.4); } // post-front rise = bluebird
+  if(p!=null&&p>1025&&(tr==null||tr>=0))s=Math.min(s,.4);
   return clamp(s);
 }
 
@@ -499,16 +550,17 @@ function pressureScore(ctx,t){
 function scoreAt(spot,ctx,t){
   const sp=spot.species||[];
   const f={
-    tideMove:tideMoveScore(ctx.tide,t),
-    tideStage:tideStageScore(spot.structure,ctx.tide,t),
-    water:tempActivity(ctx.water,sp),
+    tideMove:tideMoveScore(ctx.tide,t,ctx),
+    tideStage:tideStageScore(spot.structure,ctx.tide,t,ctx),
+    water:waterScore(ctx,sp),
     timeOfDay:timeOfDayScore(ctx,t,sp),
     solunar:solunarScore(ctx,t),
     wind:windScore(ctx.windAt(t)),
     pressure:pressureScore(ctx,t),
     structure:(structCache[spot.id]&&!structCache[spot.id].noData)?structCache[spot.id].score:0.6,
   };
-  let s=0; for(const k in WEIGHTS)s+=WEIGHTS[k]*f[k];
+  const W=calibWeights||WEIGHTS;
+  let s=0; for(const k in W)s+=W[k]*f[k];
   const hab=(habCache[spot.id]&&habCache[spot.id].mult)||1;
   return {score:Math.round(clamp(s*hab,0,1)*100),f,hab};
 }
@@ -526,8 +578,11 @@ function reasonsFrom(spot,ctx,res,t){
   if(f.solunar>.8)out.push('Inside a solunar feeding period');
   if(f.wind<.45)out.push(`Windy (${Math.round(ctx.windAt(t))} mph)`);
   else if(f.wind>.9)out.push('Light, fishable wind');
-  if(f.pressure>.85)out.push('Falling barometer — fish feeding ahead of a change');
-  else if(f.pressure<.45)out.push('High, stable pressure — tougher bite');
+  if(f.pressure>.85)out.push('Falling barometer / front moving in — feeding ahead of it');
+  else if(f.pressure<.45)out.push('High, stable post-front pressure — tougher bite');
+  if(ctx.windTideFt!=null&&Math.abs(ctx.windTideFt)>0.6)out.push(`Wind tide ${ctx.windTideFt>0?'+':''}${ctx.windTideFt.toFixed(1)}ft — water ${ctx.windTideFt>0?'pushed in':'blown out'}`);
+  if(ctx.cloudNow!=null&&ctx.cloudNow>70&&f.timeOfDay>.5)out.push('Overcast — low light extends the bite');
+  if(ctx.tempTrendF!=null&&ctx.tempTrendF<-4)out.push(`Water cooling fast (${ctx.tempTrendF}°F/2d)`);
   if(res.hab>1.02)out.push('On mapped fish habitat');
   const st=structCache[spot.id];
   if(st&&!st.noData){ if(f.structure>.75&&st.tags.length)out.unshift(st.tags[0]); else if(f.structure<.42)out.push('Flat, featureless bottom'); }
@@ -554,33 +609,56 @@ async function getContext(lat,lng){
   const key=lat.toFixed(3)+','+lng.toFixed(3);
   if(ctxCache[key]&&Date.now()-ctxCache[key]._t<12*6e4)return ctxCache[key];
   const d0=ymd(new Date()), d2=ymd(new Date(Date.now()+6*864e5));   // 7-day horizon for trip planning
-  const wxU=`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m,pressure_msl&hourly=wind_speed_10m,pressure_msl&daily=sunrise,sunset&forecast_days=7&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto`;
+  const wxU=`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m,pressure_msl,cloud_cover&hourly=wind_speed_10m,pressure_msl,cloud_cover&daily=sunrise,sunset,temperature_2m_mean&past_days=2&forecast_days=7&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto`;
   const marU=`https://marine-api.open-meteo.com/v1/marine?latitude=${lat}&longitude=${lng}&current=wave_height,sea_surface_temperature&length_unit=imperial&timezone=auto`;
-  const [tide,wx,mar,wtemp]=await Promise.all([ fetchTide(lat,lng,d0,d2),
+  const [tide,wx,mar,wtemp,stream]=await Promise.all([ fetchTide(lat,lng,d0,d2),
     fetch(wxU).then(r=>r.json()).catch(()=>null),
     fetch(marU).then(r=>r.json()).catch(()=>null),
-    fetchWaterTemp(lat,lng) ]);
+    fetchWaterTemp(lat,lng), fetchStreamflow(lat,lng) ]);
 
   const cur=wx?.current||{}, hourly=wx?.hourly||{}, daily=wx?.daily||{};
   const hTimes=(hourly.time||[]).map(s=>new Date(s).getTime());
-  const hWind=hourly.wind_speed_10m||[], hPress=hourly.pressure_msl||[];
+  const hWind=hourly.wind_speed_10m||[], hPress=hourly.pressure_msl||[], hCloud=hourly.cloud_cover||[];
   const sunDays=(daily.time||[]).map((d,i)=>({date:d,sunrise:daily.sunrise?.[i]?new Date(daily.sunrise[i]):null,sunset:daily.sunset?.[i]?new Date(daily.sunset[i]):null}));
-  const nearH=t=>{const ms=t.getTime();let bi=0,bd=1e15;for(let i=0;i<hTimes.length;i++){const dd=Math.abs(hTimes[i]-ms);if(dd<bd){bd=dd;bi=i}}return bi;};
+  const nearH=t=>{const ms=(t&&t.getTime)?t.getTime():t;let bi=0,bd=1e15;for(let i=0;i<hTimes.length;i++){const dd=Math.abs(hTimes[i]-ms);if(dd<bd){bd=dd;bi=i}}return bi;};
   const moonI=moonInfo(new Date());
+  // water-temp trend (°F): today's daily mean vs 2 days ago
+  const dMean=daily.temperature_2m_mean||[], dTime=daily.time||[], ti=dTime.indexOf(ymd(new Date()));
+  const tempTrendF=(ti>=2&&dMean[ti]!=null&&dMean[ti-2]!=null)?Math.round((dMean[ti]-dMean[ti-2])*10)/10:null;
+  // wind tide = observed water level − astronomical prediction (uses the curve we already have)
+  let windTideFt=null;
+  if(tide.station){try{
+    const ow=await fetch(`https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?station=${tide.station.id}&product=water_level&date=latest&datum=MLLW&units=english&time_zone=lst_ldt&format=json`).then(r=>r.json());
+    const d=ow?.data?.[0];
+    if(d&&d.v!=null){const ot=new Date(d.t.replace(' ','T')),pred=heightAt(tide,ot);if(pred!=null)windTideFt=Math.round((+d.v-pred)*100)/100;}
+  }catch(e){}}
 
   const ctx={
     _t:Date.now(), tide,
     water: wtemp!=null?wtemp:(mar?.current?.sea_surface_temperature!=null?Math.round(mar.current.sea_surface_temperature*9/5+32):null),
     waterSrc: wtemp!=null?'NOAA station':(mar?.current?.sea_surface_temperature!=null?'satellite SST':''),
-    cur, mar:mar?.current||{}, summer:[5,6,7,8,9].includes(new Date().getMonth()),
+    cur, mar:mar?.current||{}, summer:[5,6,7,8,9].includes(new Date().getMonth()), month:new Date().getMonth(),
     moonIllum:moonI.illum, moon:moonI,
+    cloudNow: cur.cloud_cover!=null?cur.cloud_cover:null, windTideFt, streamCfs: stream, tempTrendF,
     windAt:t=>hWind.length?hWind[nearH(t)]:(cur.wind_speed_10m??null),
     pressAt:t=>hPress.length?hPress[nearH(t)]:(cur.pressure_msl??null),
+    cloudAt:t=>hCloud.length?hCloud[nearH(t)]:(cur.cloud_cover??null),
     pressTrendAt:t=>{const i=nearH(t);if(i<3||i>=hPress.length)return null;return hPress[i]-hPress[i-3];}, // mb / 3h
+    pressTrend24At:t=>{const i=nearH(t),j=nearH(((t&&t.getTime)?t.getTime():t)-24*36e5);if(i>=hPress.length||j>=hPress.length||hPress[i]==null||hPress[j]==null)return null;return hPress[i]-hPress[j];},
     sunFor:t=>{const ds=ymd(t);return sunDays.find(x=>x.date===ds)||sunDays[0];},
     moonFor:t=>moonSolunar(lat,lng,t),
   };
   ctxCache[key]=ctx; return ctx;
+}
+let _stream={cfs:undefined,_t:0};
+async function fetchStreamflow(lat,lng){ // TX central-coast freshwater inflow proxy (Guadalupe R @ Victoria)
+  const r=regionFor(lat,lng); if(!r||r.name!=='Texas')return null;
+  if(_stream.cfs!==undefined&&Date.now()-_stream._t<30*6e4)return _stream.cfs;
+  try{
+    const j=await fetch('https://waterservices.usgs.gov/nwis/iv/?format=json&sites=08176500&parameterCd=00060&siteStatus=active').then(r=>r.json());
+    const v=j?.value?.timeSeries?.[0]?.values?.[0]?.value?.[0]?.value;
+    _stream={cfs:v!=null?+v:null,_t:Date.now()}; return _stream.cfs;
+  }catch(e){_stream={cfs:null,_t:Date.now()}; return null;}
 }
 async function fetchWaterTemp(lat,lng){
   try{
@@ -800,6 +878,8 @@ async function snapshotAt(lat,lng,structure,species,id){
     pressureTrend: trendTxt(ctx.pressTrendAt(now)),
     moon: ctx.moon.name, moonIllumPct: Math.round(ctx.moon.illum*100),
     biteScore: res.score,
+    factors: res.f,   // normalized 0-1 factor breakdown — feeds weight calibration
+    windTideFt: ctx.windTideFt, cloudPct: ctx.cloudNow, tempTrendF: ctx.tempTrendF, streamCfs: ctx.streamCfs,
     bottom: st.noData?null:{depthFt:st.depthFt!=null?+st.depthFt.toFixed(1):null,reliefFt:st.reliefFt!=null?+st.reliefFt.toFixed(1):null,feature:st.feature},
     structure: structure||null,
     hourLocal: now.getHours()
@@ -1080,10 +1160,18 @@ async function changeSync(){
 }
 
 /* ---- Settings panel ---- */
+const FLABEL={tideMove:'Current',tideStage:'Tide stage',water:'Water/season',timeOfDay:'Time/light',solunar:'Solunar',wind:'Wind',pressure:'Weather/front',structure:'Structure'};
 function openSettings(){
   document.getElementById('setVer').textContent=APP_VERSION;
   document.getElementById('setSync').textContent=syncCode;
   document.getElementById('setUpd').textContent='';
+  const el=document.getElementById('setCalib');
+  if(!calibWeights){const r=calibrateWeights(); // recompute status
+    el.innerHTML='<span class="muted">Using default weights. Log at least 4 catches and 2 slow sessions to calibrate'+(r&&!r.ok?` (have ${r.catches} / ${r.blanks}).`:'.')+'</span>';
+  }else{
+    const diffs=Object.keys(WEIGHTS).map(k=>({k,d:calibWeights[k]-WEIGHTS[k]})).sort((a,b)=>Math.abs(b.d)-Math.abs(a.d)).slice(0,3);
+    el.innerHTML='<b style="color:#0a7a52">✓ Calibrated to your logs.</b> Biggest shifts: '+diffs.map(x=>`${FLABEL[x.k]||x.k} ${x.d>=0?'↑':'↓'}`).join(', ')+'.';
+  }
   document.getElementById('setBg').classList.add('open');
 }
 async function checkUpdate(){
@@ -1111,6 +1199,7 @@ document.getElementById('setBg').onclick=e=>{if(e.target.id==='setBg')e.currentT
 document.getElementById('setCheck').onclick=checkUpdate;
 document.getElementById('setForce').onclick=forceRefresh;
 document.getElementById('setSyncBtn').onclick=changeSync;
+document.getElementById('setCalibReset').onclick=()=>{resetWeights();openSettings();toast('Reset to default weights');scoreAllSpots().then(()=>renderSpots());};
 
 /* ============================ SPOT DETAIL ============================ */
 async function openDetail(id){
@@ -1126,7 +1215,7 @@ async function openDetail(id){
     s._score=res.score; if(markers[s.id])markers[s.id].setIcon(pinIcon(res.score));
     const wins=bestWindows(s,ctx);
     const hab=habCache[s.id]||{tags:[]};const struc=structCache[s.id]||{tags:[]};
-    const FN=[['tideMove','Current'],['tideStage','Tide stage'],['structure','Bottom structure'],['water','Water temp'],['timeOfDay','Time of day'],['solunar','Solunar'],['wind','Wind'],['pressure','Pressure']];
+    const FN=[['tideMove','Current'],['tideStage','Tide stage'],['structure','Bottom structure'],['water','Water/season'],['timeOfDay','Time/light'],['solunar','Solunar'],['wind','Wind'],['pressure','Weather/front']];
     body.innerHTML=`
       <div class="row" style="margin:2px 2px 6px;align-items:flex-start">
         <div class="ring" style="--p:${res.score};--rc:${scoreColor(res.score)}"><div class="in"><div><div class="n">${res.score}</div><div class="l">bite now</div></div></div></div>
@@ -1339,7 +1428,7 @@ async function saveLog(kind){
   const notes=document.getElementById('logNotes').value.trim()||null;
   let cond={};try{cond=await snapshotAt(lc.lat,lc.lng,lc.structure,lc.species?[lc.species]:[],lc.spotId||undefined);}catch(e){}
   const cat={id:uid(),kind,spot_id:lc.spotId,spot_name:lc.spotName,lat:lc.lat,lng:lc.lng,species:lc.species||'(target unspecified)',count:kind==='catch'?lc.count:0,length_in:len,bait,notes,structure:lc.structure,conditions:cond,caught_at:new Date().toISOString()};
-  catches.unshift(cat);saveCatches();pushCatch(cat);
+  catches.unshift(cat);saveCatches();pushCatch(cat);calibrateWeights();scoreAllSpots().then(()=>renderSpots());
   document.getElementById('logBg').classList.remove('open');toast(kind==='catch'?'Catch logged 🎣':'Slow session logged');renderCatches();
   save.disabled=blank.disabled=false;save.textContent='Save catch';blank.textContent='🚫 No fish — log this slow session';logState=null;
 }
@@ -1410,6 +1499,7 @@ async function boot(lat,lng,label){
   const [cloud,cloudC]=await Promise.all([pullSpots().catch(()=>null),pullCatches().catch(()=>null)]); // localStorage already painted
   if(cloud){spots=cloud;save();refreshMarkers();}
   if(cloudC){catches=cloudC;saveCatches();}
+  calibrateWeights();
   renderSpots();
   await scoreAllSpots(); renderSpots();
 }
