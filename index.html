@@ -65,9 +65,11 @@
 
   #map{height:60vh;min-height:320px;width:100%;z-index:1}
   .mapwrap{position:relative}
-  .maphint{position:absolute;left:50%;transform:translateX(-50%);bottom:14px;z-index:500;
-    background:rgba(14,42,50,.86);color:#fff;font-size:12.5px;font-weight:600;padding:8px 14px;border-radius:20px;
-    box-shadow:var(--shadow-lg);pointer-events:none;backdrop-filter:blur(4px)}
+  .crosshair{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:450;pointer-events:none;
+    width:28px;height:28px;border:2.5px solid var(--teal);border-radius:50%;
+    box-shadow:0 0 0 2px rgba(255,255,255,.75),0 1px 5px rgba(0,0,0,.3)}
+  .crosshair:after{content:"";position:absolute;left:50%;top:50%;width:4px;height:4px;border-radius:50%;
+    background:var(--teal);transform:translate(-50%,-50%);box-shadow:0 0 0 1.5px #fff}
   .mapbtns{position:absolute;right:10px;top:10px;z-index:500;display:flex;flex-direction:column;gap:7px}
   .mapbtns button{background:#fff;border:1px solid var(--line);border-radius:11px;padding:8px 11px;font-size:12.5px;font-weight:700;color:var(--ink);box-shadow:var(--shadow);display:flex;align-items:center;gap:6px}
   .mapbtns button.on{background:var(--teal);color:#fff;border-color:var(--teal)}
@@ -180,7 +182,7 @@
       <div class="legend"><span><span class="d" style="background:var(--green)"></span>Hot</span><span><span class="d" style="background:var(--amber)"></span>Fair</span><span><span class="d" style="background:var(--grey)"></span>Slow</span></div>
       <div class="legend" id="depthLegend" style="left:auto;right:10px;bottom:10px;display:none"><span id="depthLegLbl">🌊 1-ft contours</span><span style="display:inline-block;width:42px;height:9px;border-radius:3px;background:linear-gradient(90deg,#d8efe2,#0a4f63);margin:0 5px"></span>deep</div>
       <div class="segctl" id="depthCtl" style="left:10px;top:10px;display:none"><button data-ft="1" class="on">1 ft</button><button data-ft="2">2 ft</button><button data-ft="5">5 ft</button></div>
-      <div class="maphint">Tap the map to drop a spot</div>
+      <div class="crosshair" id="crosshair" aria-hidden="true"></div>
     </div>
   </section>
 
@@ -305,7 +307,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v11';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v12';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -608,7 +610,6 @@ function moonSolunar(lat,lng,t){
 function initMap(){
   map=L.map('map',{zoomControl:true,attributionControl:false}).setView([28.45,-96.40],11); // Port O'Connor, TX
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
-  map.on('click',e=>openEdit(null,e.latlng));
   spots.forEach(addMarker);
 }
 function pinIcon(score){
@@ -942,6 +943,7 @@ document.querySelectorAll('.nav button').forEach(b=>{
     document.getElementById('tabSpots').classList.toggle('hidden',t!=='Spots');
     document.getElementById('tabCatches').classList.toggle('hidden',t!=='Catches');
     document.getElementById('tabToday').classList.toggle('hidden',t!=='Today');
+    document.getElementById('fab').classList.toggle('hidden',t!=='Map');
     if(t==='Map'&&map)setTimeout(sizeMap,60);
     if(t==='Spots')renderSpots();
     if(t==='Catches')renderCatches();
@@ -969,7 +971,7 @@ function openEdit(id,latlng,prefill){
   document.getElementById('delSpot').classList.toggle('hidden',!id);
   bg.classList.add('open');
 }
-document.getElementById('fab').onclick=()=>{const c=map.getCenter();openEdit(null,{lat:c.lat,lng:c.lng});toast('Pin at map center — tap the map to place precisely')};
+document.getElementById('fab').onclick=()=>{const c=map.getCenter();openEdit(null,{lat:c.lat,lng:c.lng});};
 document.getElementById('cancelEdit').onclick=()=>document.getElementById('editBg').classList.remove('open');
 document.getElementById('editBg').onclick=e=>{if(e.target.id==='editBg')e.currentTarget.classList.remove('open')};
 document.getElementById('saveSpot').onclick=async()=>{
