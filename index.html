@@ -321,7 +321,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v14';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v15';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -633,6 +633,7 @@ function toggleSat(){
   const btn=document.getElementById('btnSat');satOn=!satOn;
   if(satOn){map.removeLayer(baseOSM);baseSat.addTo(map);satLabels.addTo(map);baseSat.bringToBack();btn.classList.add('on');btn.innerHTML='🗺️ Map';}
   else{map.removeLayer(baseSat);map.removeLayer(satLabels);baseOSM.addTo(map);baseOSM.bringToBack();btn.classList.remove('on');btn.innerHTML='🛰️ Satellite';}
+  localStorage.setItem('saltspots.base',satOn?'sat':'osm');
 }
 function pinIcon(score){
   const c=scoreColor(score);
@@ -1400,6 +1401,7 @@ async function loadHeader(lat,lng,label){
 
 /* ============================ BOOT ============================ */
 initMap();renderSpots();
+if(localStorage.getItem('saltspots.base')==='sat')toggleSat(); // restore saved base map
 // size the map to fill the space between header and bottom nav
 function sizeMap(){const el=document.getElementById('map');if(!el)return;const top=el.getBoundingClientRect().top+window.scrollY;const navH=(document.querySelector('.nav')||{}).offsetHeight||60;el.style.height=Math.max(300,window.innerHeight-top-navH)+'px';if(map)map.invalidateSize();}
 sizeMap();window.addEventListener('resize',sizeMap);window.addEventListener('load',sizeMap);window.addEventListener('orientationchange',()=>setTimeout(sizeMap,250));
