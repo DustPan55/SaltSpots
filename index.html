@@ -335,8 +335,13 @@
     <div id="setCalib" style="font-size:13px"></div>
     <div style="height:8px"></div><button class="btn sm ghost" id="setCalibReset" style="width:auto">Reset to defaults</button>
   </div>
+  <div class="card">
+    <div class="row"><div style="flex:1;min-width:0"><div style="font-weight:700">Ocean layers (SST / chlorophyll)</div>
+    <div class="muted" style="font-size:12px">Offshore temp breaks &amp; water color — best in the Gulf, not the bays. New imagery ~once a day.</div></div>
+    <button class="btn sm ghost" id="setOcean" style="width:auto">Off</button></div>
+  </div>
   <button class="btn ghost" id="setForce">🔄 Force update (clear cache &amp; reload)</button>
-  <div class="src" style="margin-top:12px">Salt Spots · data: NOAA CO-OPS tides &amp; water temp, Open-Meteo, NCEI CUDEM bathymetry, NOAA ENC, FL FWC &amp; TX TPWD habitat, imagery © Esri, Ollama AI. Scores are guidance — verify on the water.</div>
+  <div class="src" style="margin-top:12px">Salt Spots · data: NOAA CO-OPS tides &amp; water temp, Open-Meteo, NCEI CUDEM bathymetry, NOAA ENC, FL FWC &amp; TX TPWD habitat, NOAA ERDDAP SST/chlorophyll, imagery © Esri, Ollama AI. Scores are guidance — verify on the water.</div>
   <div style="height:10px"></div>
   <button class="btn ghost" id="setClose">Close</button>
   <div style="height:10px"></div>
@@ -349,7 +354,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v20';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v21';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -974,6 +979,13 @@ function toggleOcean(kind){
 }
 document.getElementById('btnSST').onclick=()=>toggleOcean('sst');
 document.getElementById('btnChl').onclick=()=>toggleOcean('chl');
+let oceanEnabled=localStorage.getItem('saltspots.ocean')==='on';
+function applyOceanEnabled(){
+  const d=oceanEnabled?'':'none';
+  const a=document.getElementById('btnSST'),b=document.getElementById('btnChl');
+  if(a)a.style.display=d; if(b)b.style.display=d;
+  if(!oceanEnabled&&oceanKind)toggleOcean(oceanKind); // turn off any active layer
+}
 
 /* Depth chart — shaded ~3 m CUDEM bathymetry + selectable contour interval (NCEI DEM_all) */
 let depthShade=null, depthContour=null, depthOn=false, depthTimer=null, depthInterval=0.3048; // m (0.3048 = 1ft)
@@ -1215,6 +1227,7 @@ function openSettings(){
   document.getElementById('setVer').textContent=APP_VERSION;
   document.getElementById('setSync').textContent=syncCode;
   document.getElementById('setUpd').textContent='';
+  document.getElementById('setOcean').textContent=oceanEnabled?'On':'Off';
   const el=document.getElementById('setCalib');
   if(!calibWeights){const r=calibrateWeights(); // recompute status
     el.innerHTML='<span class="muted">Using default weights. Log at least 4 catches and 2 slow sessions to calibrate'+(r&&!r.ok?` (have ${r.catches} / ${r.blanks}).`:'.')+'</span>';
@@ -1250,6 +1263,11 @@ document.getElementById('setCheck').onclick=checkUpdate;
 document.getElementById('setForce').onclick=forceRefresh;
 document.getElementById('setSyncBtn').onclick=changeSync;
 document.getElementById('setCalibReset').onclick=()=>{resetWeights();openSettings();toast('Reset to default weights');scoreAllSpots().then(()=>renderSpots());};
+document.getElementById('setOcean').onclick=()=>{
+  oceanEnabled=!oceanEnabled;localStorage.setItem('saltspots.ocean',oceanEnabled?'on':'off');
+  applyOceanEnabled();document.getElementById('setOcean').textContent=oceanEnabled?'On':'Off';
+  toast(oceanEnabled?'Ocean layers added to the map':'Ocean layers hidden');
+};
 
 /* ============================ SPOT DETAIL ============================ */
 async function openDetail(id){
@@ -1577,7 +1595,7 @@ async function loadHeader(lat,lng,label){
 }
 
 /* ============================ BOOT ============================ */
-initMap();renderSpots();
+initMap();renderSpots();applyOceanEnabled(); // ocean layers off by default; hidden unless enabled in Settings
 if(localStorage.getItem('saltspots.base')==='sat')toggleSat(); // restore saved base map
 if(window.innerWidth>=980){const sb=document.querySelector('.nav button[data-tab="Spots"]');if(sb)sb.click();} // desktop: map always shown, open Spots panel
 // size the map to fill the space between header and bottom nav
