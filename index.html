@@ -204,8 +204,11 @@
         <button id="btnOyster">🦪 Oyster</button>
         <button id="btnGrass">🌿 Grass</button>
         <button id="btnDepth">🌊 Depth</button>
+        <button id="btnSST">🌡️ SST</button>
+        <button id="btnChl">🟢 Chl</button>
       </div>
       <div class="legend"><span><span class="d" style="background:var(--green)"></span>Hot</span><span><span class="d" style="background:var(--amber)"></span>Fair</span><span><span class="d" style="background:var(--grey)"></span>Slow</span></div>
+      <div class="legend" id="oceanLegend" style="left:auto;right:10px;bottom:38px;display:none"></div>
       <div class="legend" id="depthLegend" style="left:auto;right:10px;bottom:10px;display:none"><span id="depthLegLbl">🌊 1-ft contours</span><span style="display:inline-block;width:42px;height:9px;border-radius:3px;background:linear-gradient(90deg,#d8efe2,#0a4f63);margin:0 5px"></span>deep</div>
       <div class="segctl" id="depthCtl" style="left:10px;top:10px;display:none"><button data-ft="1" class="on">1 ft</button><button data-ft="2">2 ft</button><button data-ft="5">5 ft</button></div>
       <div class="crosshair" id="crosshair" aria-hidden="true"></div>
@@ -346,7 +349,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v19';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v20';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -943,6 +946,34 @@ document.getElementById('btnFind').onclick=suggestSpots;
 document.getElementById('btnDepth').onclick=toggleDepth;
 document.getElementById('btnSat').onclick=toggleSat;
 document.getElementById('btnAgent').onclick=runPatternAgent;
+
+/* Ocean overlays — NOAA ERDDAP SST (MUR 1km) + chlorophyll (water color), 4326 WMS image, refresh on move */
+let oceanLayer=null, oceanKind=null, oceanMover=null, oceanTimer=null;
+const OCEAN={sst:{ds:'jplMURSST41',v:'analysed_sst',name:'sea-surface temp',leg:'🌡️ SST cool → warm'},
+  chl:{ds:'erdMH1chla1day',v:'chlorophyll',name:'chlorophyll',leg:'🟢 Chlorophyll low→high · color edge = bait line'}};
+function oceanUrl(kind){
+  const o=OCEAN[kind],b=map.getBounds(),s=map.getSize(),sc=Math.min(1,1200/Math.max(s.x,s.y)),w=Math.round(s.x*sc),h=Math.round(s.y*sc);
+  const bbox=`${b.getWest()},${b.getSouth()},${b.getEast()},${b.getNorth()}`;
+  return `https://coastwatch.pfeg.noaa.gov/erddap/wms/${o.ds}/request?service=WMS&version=1.1.1&request=GetMap&srs=EPSG:4326&bbox=${bbox}&layers=${o.ds}:${o.v}&styles=&format=image/png&transparent=true&width=${w}&height=${h}`;
+}
+function drawOcean(){
+  if(!oceanKind)return;
+  const b=map.getBounds(),old=oceanLayer;
+  const nl=L.imageOverlay(oceanUrl(oceanKind),b,{opacity:0.6,interactive:false}).addTo(map);
+  oceanLayer=nl; const drop=()=>{if(old)map.removeLayer(old);}; nl.on('load',drop); nl.on('error',drop);
+}
+function toggleOcean(kind){
+  const sst=document.getElementById('btnSST'),chl=document.getElementById('btnChl'),leg=document.getElementById('oceanLegend');
+  if(oceanKind===kind){if(oceanLayer)map.removeLayer(oceanLayer);oceanLayer=null;oceanKind=null;map.off('moveend',oceanMover);sst.classList.remove('on');chl.classList.remove('on');leg.style.display='none';return;}
+  if(map.getZoom()<7){toast('Zoom out a touch — these are regional ocean layers');return;}
+  oceanKind=kind;sst.classList.toggle('on',kind==='sst');chl.classList.toggle('on',kind==='chl');
+  if(!oceanMover)oceanMover=()=>{clearTimeout(oceanTimer);oceanTimer=setTimeout(drawOcean,300);};
+  map.off('moveend',oceanMover);map.on('moveend',oceanMover);
+  leg.textContent=OCEAN[kind].leg;leg.style.display='';
+  toast('Loading '+OCEAN[kind].name+'…');drawOcean();
+}
+document.getElementById('btnSST').onclick=()=>toggleOcean('sst');
+document.getElementById('btnChl').onclick=()=>toggleOcean('chl');
 
 /* Depth chart — shaded ~3 m CUDEM bathymetry + selectable contour interval (NCEI DEM_all) */
 let depthShade=null, depthContour=null, depthOn=false, depthTimer=null, depthInterval=0.3048; // m (0.3048 = 1ft)
