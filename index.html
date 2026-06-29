@@ -70,6 +70,12 @@
     box-shadow:0 0 0 2px rgba(255,255,255,.75),0 1px 5px rgba(0,0,0,.3)}
   .crosshair:after{content:"";position:absolute;left:50%;top:50%;width:4px;height:4px;border-radius:50%;
     background:var(--teal);transform:translate(-50%,-50%);box-shadow:0 0 0 1.5px #fff}
+  .reposbar{position:absolute;left:10px;right:10px;bottom:12px;z-index:600;background:rgba(14,42,50,.93);color:#fff;
+    border-radius:14px;padding:9px 10px 9px 14px;box-shadow:var(--shadow-lg);display:flex;align-items:center;gap:8px;backdrop-filter:blur(4px)}
+  .reposbar .rb-msg{flex:1;font-size:13px;font-weight:600;min-width:0}
+  .reposbar button{padding:9px 13px;border-radius:10px;font-weight:700;font-size:13.5px;color:#fff}
+  .reposbar #reposCancel{background:rgba(255,255,255,.18)}
+  .reposbar #reposSave{background:var(--teal)}
   .mapbtns{position:absolute;right:10px;top:10px;z-index:500;display:flex;flex-direction:column;gap:7px}
   .mapbtns button{background:#fff;border:1px solid var(--line);border-radius:11px;padding:8px 11px;font-size:12.5px;font-weight:700;color:var(--ink);box-shadow:var(--shadow);display:flex;align-items:center;gap:6px}
   .mapbtns button.on{background:var(--teal);color:#fff;border-color:var(--teal)}
@@ -183,6 +189,11 @@
       <div class="legend" id="depthLegend" style="left:auto;right:10px;bottom:10px;display:none"><span id="depthLegLbl">🌊 1-ft contours</span><span style="display:inline-block;width:42px;height:9px;border-radius:3px;background:linear-gradient(90deg,#d8efe2,#0a4f63);margin:0 5px"></span>deep</div>
       <div class="segctl" id="depthCtl" style="left:10px;top:10px;display:none"><button data-ft="1" class="on">1 ft</button><button data-ft="2">2 ft</button><button data-ft="5">5 ft</button></div>
       <div class="crosshair" id="crosshair" aria-hidden="true"></div>
+      <div class="reposbar" id="reposBar" style="display:none">
+        <div class="rb-msg">Pan so the crosshair is on the spot</div>
+        <button id="reposCancel">Cancel</button>
+        <button id="reposSave">✓ Move here</button>
+      </div>
     </div>
   </section>
 
@@ -244,6 +255,8 @@
   <textarea class="in" id="fNotes" placeholder="Tide stage, bait, wind direction that works, last catch…"></textarea>
   <div style="height:16px"></div>
   <button class="btn" id="saveSpot">Save Spot</button>
+  <div style="height:8px"></div>
+  <button class="btn ghost hidden" id="moveSpot">📍 Move location (use crosshair)</button>
   <div style="height:8px"></div>
   <button class="btn ghost hidden" id="delSpot">Delete Spot</button>
   <div style="height:6px"></div>
@@ -307,7 +320,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v12';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v13';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -969,6 +982,7 @@ function openEdit(id,latlng,prefill){
   SPECIES.forEach(sp=>{const el=document.createElement('button');el.className='pick'+(sel.has(sp)?' on':'');
     el.textContent=sp;el.onclick=()=>el.classList.toggle('on');pc.appendChild(el);});
   document.getElementById('delSpot').classList.toggle('hidden',!id);
+  document.getElementById('moveSpot').classList.toggle('hidden',!id);
   bg.classList.add('open');
 }
 document.getElementById('fab').onclick=()=>{const c=map.getCenter();openEdit(null,{lat:c.lat,lng:c.lng});};
@@ -990,6 +1004,35 @@ document.getElementById('delSpot').onclick=()=>{
   if(!editingId)return;removeSpot(editingId);spots=spots.filter(x=>x.id!==editingId);save();refreshMarkers();
   document.getElementById('editBg').classList.remove('open');document.getElementById('detailBg').classList.remove('open');
   renderSpots();toast('Spot deleted');editingId=null;
+};
+
+/* ---- Reposition a spot using the map crosshair ---- */
+let reposId=null;
+function startReposition(id){
+  const s=spots.find(x=>x.id===id);if(!s)return;
+  reposId=id;
+  document.getElementById('editBg').classList.remove('open');
+  document.getElementById('detailBg').classList.remove('open');
+  const mapBtn=document.querySelector('.nav button[data-tab="Map"]');
+  if(document.getElementById('tabMap').classList.contains('hidden'))mapBtn.click();
+  setTimeout(()=>map.setView([s.lat,s.lng],Math.max(map.getZoom(),16)),90);
+  document.getElementById('fab').classList.add('hidden');
+  document.getElementById('reposBar').style.display='flex';
+  toast('Pan the map so the crosshair sits on the spot');
+}
+function endReposition(){
+  reposId=null;document.getElementById('reposBar').style.display='none';
+  if(!document.getElementById('tabMap').classList.contains('hidden'))document.getElementById('fab').classList.remove('hidden');
+}
+document.getElementById('moveSpot').onclick=()=>{if(editingId)startReposition(editingId);};
+document.getElementById('reposCancel').onclick=endReposition;
+document.getElementById('reposSave').onclick=async()=>{
+  if(!reposId)return;const s=spots.find(x=>x.id===reposId);if(!s){endReposition();return;}
+  const c=map.getCenter();s.lat=c.lat;s.lng=c.lng;
+  delete habCache[s.id];delete structCache[s.id];s._score=undefined;
+  save();pushSpot(s);refreshMarkers();endReposition();toast('Spot moved 📍');
+  try{await Promise.all([ensureHabitat(s),ensureStructure(s)]);const ctx=await getContext(s.lat,s.lng);
+    s._score=scoreAt(s,ctx,new Date()).score;if(markers[s.id])markers[s.id].setIcon(pinIcon(s._score));renderSpots();}catch(e){}
 };
 
 /* ============================ SPOT LIST ============================ */
