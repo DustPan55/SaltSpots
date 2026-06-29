@@ -72,6 +72,9 @@
   .mapbtns button.on{background:var(--teal);color:#fff;border-color:var(--teal)}
   .legend{position:absolute;left:10px;bottom:10px;z-index:500;background:rgba(255,255,255,.94);border:1px solid var(--line);border-radius:11px;padding:7px 10px;font-size:11px;font-weight:600;box-shadow:var(--shadow);display:flex;gap:10px;align-items:center}
   .legend .d{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:3px;vertical-align:middle}
+  .segctl{position:absolute;z-index:500;display:flex;gap:3px;background:rgba(255,255,255,.94);border:1px solid var(--line);border-radius:11px;padding:4px;box-shadow:var(--shadow)}
+  .segctl button{padding:6px 11px;font-size:12.5px;font-weight:700;border-radius:8px;color:var(--muted)}
+  .segctl button.on{background:var(--teal);color:#fff}
 
   .spot{display:flex;align-items:center;gap:12px;padding:13px 14px;border:1px solid var(--line);border-radius:15px;background:#fff;margin-bottom:10px;box-shadow:var(--shadow);transition:transform .08s}
   .spot:active{transform:scale(.99)}
@@ -173,7 +176,8 @@
         <button id="btnDepth">🌊 Depth</button>
       </div>
       <div class="legend"><span><span class="d" style="background:var(--green)"></span>Hot</span><span><span class="d" style="background:var(--amber)"></span>Fair</span><span><span class="d" style="background:var(--grey)"></span>Slow</span></div>
-      <div class="legend" id="depthLegend" style="left:auto;right:10px;bottom:10px;display:none">🌊 1-ft contours<span style="display:inline-block;width:46px;height:9px;border-radius:3px;background:linear-gradient(90deg,#d8efe2,#0a4f63);margin:0 5px"></span>deep</div>
+      <div class="legend" id="depthLegend" style="left:auto;right:10px;bottom:10px;display:none"><span id="depthLegLbl">🌊 1-ft contours</span><span style="display:inline-block;width:42px;height:9px;border-radius:3px;background:linear-gradient(90deg,#d8efe2,#0a4f63);margin:0 5px"></span>deep</div>
+      <div class="segctl" id="depthCtl" style="left:10px;top:10px;display:none"><button data-ft="1" class="on">1 ft</button><button data-ft="2">2 ft</button><button data-ft="5">5 ft</button></div>
       <div class="maphint">Tap the map to drop a spot</div>
     </div>
   </section>
@@ -792,27 +796,38 @@ document.getElementById('btnFind').onclick=suggestSpots;
 document.getElementById('btnDepth').onclick=toggleDepth;
 document.getElementById('btnAgent').onclick=runPatternAgent;
 
-/* Depth chart — shaded ~3 m CUDEM bathymetry + 1-ft contour lines (NCEI DEM_all) */
-let depthShade=null, depthContour=null, depthMover=null;
-let depthInterval=0.3048; // metres per contour line (0.3048 = 1 ft)
+/* Depth chart — shaded ~3 m CUDEM bathymetry + selectable contour interval (NCEI DEM_all) */
+let depthShade=null, depthContour=null, depthOn=false, depthTimer=null, depthInterval=0.3048; // m (0.3048 = 1ft)
 const RR_SHADE=encodeURIComponent('{"rasterFunction":"ColorHillshade"}');
 function rrContour(){return encodeURIComponent(JSON.stringify({rasterFunction:'Contour',rasterFunctionArguments:{ContourInterval:depthInterval,ContourType:0,ZBase:0,NumberOfContours:0,ZFactor:1}}));}
 function demUrl(rr){
-  const b=map.getBounds(),crs=map.options.crs;
-  const sw=crs.project(b.getSouthWest()),ne=crs.project(b.getNorthEast()),size=map.getSize();
-  return `${DEM_ALL}/exportImage?bbox=${sw.x},${sw.y},${ne.x},${ne.y}&bboxSR=3857&imageSR=3857&size=${size.x},${size.y}&format=png&transparent=true&renderingRule=${rr}&f=image`;
+  const b=map.getBounds(),crs=map.options.crs,sw=crs.project(b.getSouthWest()),ne=crs.project(b.getNorthEast());
+  const s=map.getSize(),sc=Math.min(1,1100/Math.max(s.x,s.y)),w=Math.round(s.x*sc),h=Math.round(s.y*sc); // cap render size for speed
+  return `${DEM_ALL}/exportImage?bbox=${sw.x},${sw.y},${ne.x},${ne.y}&bboxSR=3857&imageSR=3857&size=${w},${h}&format=png&transparent=true&renderingRule=${rr}&f=image`;
 }
+function setDepthLbl(loading){const e=document.getElementById('depthLegLbl');if(e)e.textContent=loading?'🌊 rendering…':`🌊 ${Math.round(depthInterval/0.3048)}-ft contours`;}
+function drawDepth(){ // recreate overlays for the current view; keep old until new loads (no flicker)
+  if(!depthOn)return;
+  const b=map.getBounds(),oldS=depthShade,oldC=depthContour;
+  setDepthLbl(true);
+  const ns=L.imageOverlay(demUrl(RR_SHADE),b,{opacity:0.78,interactive:false}).addTo(map);
+  const nc=L.imageOverlay(demUrl(rrContour()),b,{opacity:0.78,interactive:false}).addTo(map);
+  depthShade=ns;depthContour=nc;
+  let n=0;const done=()=>{if(++n>=2){setDepthLbl(false);[oldS,oldC].forEach(l=>l&&map.removeLayer(l));}};
+  [ns,nc].forEach(l=>{l.on('load',done);l.on('error',done);});
+}
+function onDepthMove(){clearTimeout(depthTimer);depthTimer=setTimeout(drawDepth,250);} // debounce panning
 function toggleDepth(){
-  const btn=document.getElementById('btnDepth'),leg=document.getElementById('depthLegend');
-  if(depthShade||depthContour){[depthShade,depthContour].forEach(l=>l&&map.removeLayer(l));depthShade=depthContour=null;if(depthMover)map.off('moveend',depthMover);btn.classList.remove('on');leg.style.display='none';return;}
+  const btn=document.getElementById('btnDepth'),leg=document.getElementById('depthLegend'),ctl=document.getElementById('depthCtl');
+  if(depthOn){depthOn=false;[depthShade,depthContour].forEach(l=>l&&map.removeLayer(l));depthShade=depthContour=null;map.off('moveend',onDepthMove);btn.classList.remove('on');leg.style.display='none';ctl.style.display='none';return;}
   if(map.getZoom()<11){toast('Zoom in to load the depth chart');return;}
-  btn.classList.add('on');leg.style.display='';toast('Loading 1-ft depth contours…');
-  const b=map.getBounds();
-  depthShade=L.imageOverlay(demUrl(RR_SHADE),b,{opacity:0.8,interactive:false}).addTo(map);
-  depthContour=L.imageOverlay(demUrl(rrContour()),b,{opacity:0.7,interactive:false}).addTo(map);
-  depthMover=()=>{const bb=map.getBounds();if(depthShade){depthShade.setUrl(demUrl(RR_SHADE));depthShade.setBounds(bb);}if(depthContour){depthContour.setUrl(demUrl(rrContour()));depthContour.setBounds(bb);}};
-  map.on('moveend',depthMover);
+  depthOn=true;btn.classList.add('on');leg.style.display='';ctl.style.display='';setDepthLbl(false);
+  map.on('moveend',onDepthMove);drawDepth();
 }
+document.querySelectorAll('#depthCtl button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('#depthCtl button').forEach(x=>x.classList.remove('on'));b.classList.add('on');
+  depthInterval=(+b.dataset.ft)*0.3048;drawDepth();
+});
 
 /* ---- Suggested spots: derive candidates from mapped habitat, score, rank ---- */
 let suggestMarkers=[];
