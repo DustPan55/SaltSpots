@@ -291,6 +291,8 @@
 <div class="sheet-bg" id="logBg"><div class="sheet"><div class="grab"></div><div class="pad">
   <h2 style="margin:2px 2px 2px">Log a Catch</h2>
   <div class="muted" id="logWhere" style="font-size:12.5px;margin:0 2px"></div>
+  <label class="fld">When</label>
+  <input class="in" id="logWhen" type="datetime-local">
   <label class="fld">Species</label>
   <div class="chips" id="logSpecies"></div>
   <label class="fld">How many?</label>
@@ -304,7 +306,7 @@
   <input class="in" id="logBait" placeholder="e.g. gold spoon, live shrimp, paddletail">
   <label class="fld">Notes (optional)</label>
   <textarea class="in" id="logNotes" placeholder="where on the spot, what they were doing…"></textarea>
-  <div class="muted" id="logCond" style="font-size:12px;margin:10px 2px">📍 Current conditions (tide, water temp, wind, structure) are captured automatically when you save.</div>
+  <div class="muted" id="logCond" style="font-size:12px;margin:10px 2px">📍 Conditions (tide, wind tide, water temp, etc.) are pulled automatically for the date &amp; time you set — backdate it and it fetches that day's history.</div>
   <div style="height:6px"></div>
   <button class="btn" id="logSave">Save catch</button>
   <div style="height:8px"></div>
@@ -354,7 +356,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v22';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v23';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -889,28 +891,79 @@ async function structureAt(id,lat,lng){
 }
 async function ensureStructure(s){return structCache[s.id]||structureAt(s.id,s.lat,s.lng);}
 // capture the engine's computed conditions at a point — stored with each catch so the agent can learn
-async function snapshotAt(lat,lng,structure,species,id){
+async function snapshotAt(lat,lng,structure,species,id,when){
+  when=when||new Date();
   id=id||('cap_'+Math.round(lat*1e4)+'_'+Math.round(lng*1e4));
   if(!habCache[id])habCache[id]=await habitatFor(lat,lng).catch(()=>({mult:1,tags:[]}));
   if(!structCache[id])await structureAt(id,lat,lng).catch(()=>{structCache[id]={score:0.6,tags:[],noData:true};});
-  const ctx=await getContext(lat,lng), now=new Date();
-  const res=scoreAt({id,structure:structure||'flat',species:species||[]},ctx,now);
+  const backdated=(Date.now()-when.getTime())>2*36e5; // >2h ago → pull historical conditions for that day
+  const ctx=backdated?await getContextAt(lat,lng,when):await getContext(lat,lng);
+  const res=scoreAt({id,structure:structure||'flat',species:species||[]},ctx,when);
   const st=structCache[id]||{};
   return {
-    tide: ctx.tide.pts.length?(slopeAt(ctx.tide,now)>0?'rising':'falling'):null,
+    backdated,
+    tide: ctx.tide.pts.length?(slopeAt(ctx.tide,when)>0?'rising':'falling'):null,
     waterTempF: ctx.water,
     windMph: ctx.cur.wind_speed_10m!=null?Math.round(ctx.cur.wind_speed_10m):null,
     windDir: ctx.cur.wind_direction_10m!=null?deg2c(ctx.cur.wind_direction_10m):null,
     pressureMb: ctx.cur.pressure_msl!=null?Math.round(ctx.cur.pressure_msl):null,
-    pressureTrend: trendTxt(ctx.pressTrendAt(now)),
+    pressureTrend: trendTxt(ctx.pressTrendAt(when)),
     moon: ctx.moon.name, moonIllumPct: Math.round(ctx.moon.illum*100),
     biteScore: res.score,
     factors: res.f,   // normalized 0-1 factor breakdown — feeds weight calibration
     windTideFt: ctx.windTideFt, cloudPct: ctx.cloudNow, tempTrendF: ctx.tempTrendF, streamCfs: ctx.streamCfs,
     bottom: st.noData?null:{depthFt:st.depthFt!=null?+st.depthFt.toFixed(1):null,reliefFt:st.reliefFt!=null?+st.reliefFt.toFixed(1):null,feature:st.feature},
     structure: structure||null,
-    hourLocal: now.getHours()
+    hourLocal: when.getHours()
   };
+}
+/* Historical conditions for a past datetime (backdated catches) */
+async function getContextAt(lat,lng,when){
+  const d0=ymd(new Date(when.getTime()-864e5)), d2=ymd(new Date(when.getTime()+864e5));
+  const isod=t=>new Date(t).toISOString().slice(0,10);
+  const daysAgo=Math.ceil((Date.now()-when.getTime())/864e5);
+  const hv='temperature_2m,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m,pressure_msl,cloud_cover';
+  let wxU;
+  if(daysAgo<=90) wxU=`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&hourly=${hv}&daily=sunrise,sunset,temperature_2m_mean&past_days=${Math.min(92,daysAgo+2)}&forecast_days=1&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto`;
+  else wxU=`https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lng}&start_date=${isod(when.getTime()-2*864e5)}&end_date=${isod(when.getTime()+864e5)}&hourly=${hv}&daily=sunrise,sunset,temperature_2m_mean&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto`;
+  const [tide,wx,wtemp]=await Promise.all([ fetchTide(lat,lng,d0,d2), fetch(wxU).then(r=>r.json()).catch(()=>null), fetchWaterTempAt(lat,lng,when) ]);
+  const hourly=wx?.hourly||{}, daily=wx?.daily||{};
+  const hTimes=(hourly.time||[]).map(s=>new Date(s).getTime());
+  const hW=hourly.wind_speed_10m||[],hP=hourly.pressure_msl||[],hC=hourly.cloud_cover||[],hT=hourly.temperature_2m||[],hD=hourly.wind_direction_10m||[],hG=hourly.wind_gusts_10m||[],hCode=hourly.weather_code||[];
+  const sunDays=(daily.time||[]).map((d,i)=>({date:d,sunrise:daily.sunrise?.[i]?new Date(daily.sunrise[i]):null,sunset:daily.sunset?.[i]?new Date(daily.sunset[i]):null}));
+  const nearH=t=>{const ms=(t&&t.getTime)?t.getTime():t;let bi=0,bd=1e15;for(let i=0;i<hTimes.length;i++){const dd=Math.abs(hTimes[i]-ms);if(dd<bd){bd=dd;bi=i}}return bi;};
+  const wi=nearH(when), moonI=moonInfo(when);
+  const dMean=daily.temperature_2m_mean||[],dTime=daily.time||[],ti=dTime.indexOf(ymd(when));
+  const tempTrendF=(ti>=2&&dMean[ti]!=null&&dMean[ti-2]!=null)?Math.round((dMean[ti]-dMean[ti-2])*10)/10:null;
+  let windTideFt=null;
+  if(tide.station){try{
+    const ow=await fetch(`https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?station=${tide.station.id}&product=water_level&begin_date=${d0}&end_date=${d2}&datum=MLLW&time_zone=lst_ldt&units=english&format=json`).then(r=>r.json());
+    const arr=(ow?.data||[]).map(p=>({t:new Date(p.t.replace(' ','T')).getTime(),v:+p.v})).filter(p=>!isNaN(p.v));
+    if(arr.length){let b=arr[0];for(const p of arr)if(Math.abs(p.t-when.getTime())<Math.abs(b.t-when.getTime()))b=p;const pred=heightAt(tide,new Date(b.t));if(pred!=null)windTideFt=Math.round((b.v-pred)*100)/100;}
+  }catch(e){}}
+  const cur={temperature_2m:hT[wi],wind_speed_10m:hW[wi],wind_direction_10m:hD[wi],wind_gusts_10m:hG[wi],pressure_msl:hP[wi],cloud_cover:hC[wi],weather_code:hCode[wi]};
+  return {
+    _t:Date.now(),tide,water:wtemp,waterSrc:wtemp!=null?'NOAA (historical)':'',
+    cur,mar:{},summer:[5,6,7,8,9].includes(when.getMonth()),month:when.getMonth(),
+    moonIllum:moonI.illum,moon:moonI,obsPts:[],cloudNow:hC[wi]!=null?hC[wi]:null,windTideFt,streamCfs:null,tempTrendF,
+    windAt:t=>hW.length?hW[nearH(t)]:null,
+    pressAt:t=>hP.length?hP[nearH(t)]:null,
+    cloudAt:t=>hC.length?hC[nearH(t)]:null,
+    pressTrendAt:t=>{const i=nearH(t);if(i<3||i>=hP.length)return null;return hP[i]-hP[i-3];},
+    pressTrend24At:t=>{const i=nearH(t),j=nearH(((t&&t.getTime)?t.getTime():t)-24*36e5);if(i>=hP.length||j>=hP.length||hP[i]==null||hP[j]==null)return null;return hP[i]-hP[j];},
+    sunFor:t=>{const dd=ymd(t);return sunDays.find(x=>x.date===dd)||sunDays[Math.floor(sunDays.length/2)]||sunDays[0];},
+    moonFor:t=>moonSolunar(lat,lng,t),
+  };
+}
+async function fetchWaterTempAt(lat,lng,when){
+  try{
+    if(!_wtStations)_wtStations=await stationList('watertemp');
+    const st=nearest(_wtStations,lat,lng); if(!st||st.dist>75)return null;
+    const d0=ymd(new Date(when.getTime()-864e5)),d2=ymd(new Date(when.getTime()+864e5));
+    const j=await fetch(`https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?station=${st.id}&product=water_temperature&begin_date=${d0}&end_date=${d2}&units=english&time_zone=lst_ldt&format=json`).then(r=>r.json());
+    const arr=(j?.data||[]).map(p=>({t:new Date(p.t.replace(' ','T')).getTime(),v:+p.v})).filter(p=>!isNaN(p.v));
+    if(!arr.length)return null; let b=arr[0];for(const p of arr)if(Math.abs(p.t-when.getTime())<Math.abs(b.t-when.getTime()))b=p; return Math.round(b.v);
+  }catch(e){return null}
 }
 
 /* habitat overlays — region-aware (FL = FWC, TX = TPWD Coastal Fisheries) */
@@ -958,9 +1011,8 @@ let oceanLayer=null, oceanOn=false, oceanMover=null, oceanTimer=null, oceanIso=n
 const OCEAN_DS='jplMURSST41', OCEAN_V='analysed_sst';
 async function fetchOceanLatest(){
   if(oceanIso)return oceanIso;
-  try{const j=await fetch(`https://coastwatch.pfeg.noaa.gov/erddap/griddap/${OCEAN_DS}.json?time%5B(last)%5D`).then(r=>r.json());
-    oceanIso=j.table.rows[j.table.rows.length-1][0];
-    oceanDate=new Date(oceanIso).toLocaleDateString([],{month:'short',day:'numeric',year:'numeric'});
+  try{const j=await fetch(`${SB_URL}/functions/v1/erddap-time?dataset=${OCEAN_DS}`,{headers:{'Authorization':'Bearer '+SB_ANON,'apikey':SB_ANON}}).then(r=>r.json()); // proxied: ERDDAP data endpoint has no CORS
+    if(j&&j.iso){oceanIso=j.iso;oceanDate=new Date(oceanIso).toLocaleDateString([],{month:'short',day:'numeric',year:'numeric'});}
   }catch(e){}
   return oceanIso;
 }
@@ -1478,6 +1530,8 @@ function openLog(o){
   logState=lc;
   document.getElementById('logWhere').textContent=lc.spotName?('At '+lc.spotName):(`${lc.lat.toFixed(4)}, ${lc.lng.toFixed(4)} (map center)`);
   document.getElementById('logCount').textContent='1';
+  const now=new Date(),tzNow=new Date(now.getTime()-now.getTimezoneOffset()*6e4).toISOString().slice(0,16);
+  document.getElementById('logWhen').value=tzNow; document.getElementById('logWhen').max=tzNow;
   document.getElementById('logLen').value='';document.getElementById('logBait').value='';document.getElementById('logNotes').value='';
   const sp=document.getElementById('logSpecies');sp.innerHTML='';
   SPECIES.forEach(s=>{const el=document.createElement('button');el.className='pick'+(lc.species===s?' on':'');el.textContent=s;el.onclick=()=>{sp.querySelectorAll('.pick').forEach(p=>p.classList.remove('on'));el.classList.add('on');logState.species=s;};sp.appendChild(el);});
@@ -1540,8 +1594,11 @@ async function saveLog(kind){
   const len=parseFloat(document.getElementById('logLen').value)||null;
   const bait=document.getElementById('logBait').value.trim()||null;
   const notes=document.getElementById('logNotes').value.trim()||null;
-  let cond={};try{cond=await snapshotAt(lc.lat,lc.lng,lc.structure,lc.species?[lc.species]:[],lc.spotId||undefined);}catch(e){}
-  const cat={id:uid(),kind,spot_id:lc.spotId,spot_name:lc.spotName,lat:lc.lat,lng:lc.lng,species:lc.species||'(target unspecified)',count:kind==='catch'?lc.count:0,length_in:len,bait,notes,structure:lc.structure,conditions:cond,caught_at:new Date().toISOString()};
+  const wv=document.getElementById('logWhen').value; let when=wv?new Date(wv):new Date(); if(isNaN(when)||when>new Date())when=new Date();
+  const back=(Date.now()-when.getTime())>2*36e5;
+  if(back)(kind==='catch'?save:blank).textContent='Fetching that day…';
+  let cond={};try{cond=await snapshotAt(lc.lat,lc.lng,lc.structure,lc.species?[lc.species]:[],lc.spotId||undefined,when);}catch(e){}
+  const cat={id:uid(),kind,spot_id:lc.spotId,spot_name:lc.spotName,lat:lc.lat,lng:lc.lng,species:lc.species||'(target unspecified)',count:kind==='catch'?lc.count:0,length_in:len,bait,notes,structure:lc.structure,conditions:cond,caught_at:when.toISOString()};
   catches.unshift(cat);saveCatches();pushCatch(cat);calibrateWeights();scoreAllSpots().then(()=>renderSpots());
   document.getElementById('logBg').classList.remove('open');toast(kind==='catch'?'Catch logged 🎣':'Slow session logged');renderCatches();
   save.disabled=blank.disabled=false;save.textContent='Save catch';blank.textContent='🚫 No fish — log this slow session';logState=null;
