@@ -180,6 +180,7 @@
     <div class="mapwrap">
       <div id="map"></div>
       <div class="mapbtns">
+        <button id="btnSat">🛰️ Satellite</button>
         <button id="btnFind">✨ Find spots</button>
         <button id="btnOyster">🦪 Oyster</button>
         <button id="btnGrass">🌿 Grass</button>
@@ -307,7 +308,7 @@
     <button class="btn sm ghost" id="setSyncBtn" style="width:auto">Change</button></div>
   </div>
   <button class="btn ghost" id="setForce">🔄 Force update (clear cache &amp; reload)</button>
-  <div class="src" style="margin-top:12px">Salt Spots · data: NOAA CO-OPS tides &amp; water temp, Open-Meteo, NCEI CUDEM bathymetry, NOAA ENC, FL FWC &amp; TX TPWD habitat, Ollama AI. Scores are guidance — verify on the water.</div>
+  <div class="src" style="margin-top:12px">Salt Spots · data: NOAA CO-OPS tides &amp; water temp, Open-Meteo, NCEI CUDEM bathymetry, NOAA ENC, FL FWC &amp; TX TPWD habitat, imagery © Esri, Ollama AI. Scores are guidance — verify on the water.</div>
   <div style="height:10px"></div>
   <button class="btn ghost" id="setClose">Close</button>
   <div style="height:10px"></div>
@@ -320,7 +321,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v13';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v14';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -620,10 +621,18 @@ function moonSolunar(lat,lng,t){
 }
 
 /* ============================ MAP ============================ */
+let baseOSM,baseSat,satLabels,satOn=false;
 function initMap(){
-  map=L.map('map',{zoomControl:true,attributionControl:false}).setView([28.45,-96.40],11); // Port O'Connor, TX
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
+  map=L.map('map',{zoomControl:true,attributionControl:false,maxZoom:20}).setView([28.45,-96.40],11); // Port O'Connor, TX
+  baseOSM=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:20,maxNativeZoom:19}).addTo(map);
+  baseSat=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:20,maxNativeZoom:19});
+  satLabels=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',{maxZoom:20,maxNativeZoom:19,opacity:.9});
   spots.forEach(addMarker);
+}
+function toggleSat(){
+  const btn=document.getElementById('btnSat');satOn=!satOn;
+  if(satOn){map.removeLayer(baseOSM);baseSat.addTo(map);satLabels.addTo(map);baseSat.bringToBack();btn.classList.add('on');btn.innerHTML='🗺️ Map';}
+  else{map.removeLayer(baseSat);map.removeLayer(satLabels);baseOSM.addTo(map);baseOSM.bringToBack();btn.classList.remove('on');btn.innerHTML='🛰️ Satellite';}
 }
 function pinIcon(score){
   const c=scoreColor(score);
@@ -832,6 +841,7 @@ document.getElementById('btnOyster').onclick=()=>toggleHabitat('oyster');
 document.getElementById('btnGrass').onclick=()=>toggleHabitat('grass');
 document.getElementById('btnFind').onclick=suggestSpots;
 document.getElementById('btnDepth').onclick=toggleDepth;
+document.getElementById('btnSat').onclick=toggleSat;
 document.getElementById('btnAgent').onclick=runPatternAgent;
 
 /* Depth chart — shaded ~3 m CUDEM bathymetry + selectable contour interval (NCEI DEM_all) */
