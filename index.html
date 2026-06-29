@@ -209,6 +209,11 @@
       </div>
       <div class="legend"><span><span class="d" style="background:var(--green)"></span>Hot</span><span><span class="d" style="background:var(--amber)"></span>Fair</span><span><span class="d" style="background:var(--grey)"></span>Slow</span></div>
       <div class="legend" id="oceanLegend" style="left:auto;right:10px;bottom:38px;display:none"></div>
+      <div class="segctl" id="tcDateCtl" style="left:auto;right:10px;bottom:70px;display:none">
+        <button id="tcPrev">◀</button>
+        <span id="tcDateLbl" style="padding:6px 4px;font-weight:700;font-size:12.5px;color:var(--ink)"></span>
+        <button id="tcNext">▶</button>
+      </div>
       <div class="legend" id="depthLegend" style="left:auto;right:10px;bottom:10px;display:none"><span id="depthLegLbl">🌊 1-ft contours</span><span style="display:inline-block;width:42px;height:9px;border-radius:3px;background:linear-gradient(90deg,#d8efe2,#0a4f63);margin:0 5px"></span>deep</div>
       <div class="segctl" id="depthCtl" style="left:10px;top:10px;display:none"><button data-ft="1" class="on">1 ft</button><button data-ft="2">2 ft</button><button data-ft="5">5 ft</button></div>
       <div class="crosshair" id="crosshair" aria-hidden="true"></div>
@@ -344,10 +349,15 @@
     <div style="height:8px"></div><button class="btn sm ghost" id="setCalibReset" style="width:auto">Reset to defaults</button>
   </div>
   <div class="card">
-    <div class="row"><div style="flex:1;min-width:0"><div style="font-weight:700">Ocean layers</div>
-    <div class="muted" style="font-size:12px">SST (offshore temp breaks) + 🌎 daily true-color imagery (water clarity / sediment). New imagery ~once a day.</div>
+    <div class="row"><div style="flex:1;min-width:0"><div style="font-weight:700">🌡️ Sea-surface temp (SST)</div>
+    <div class="muted" style="font-size:12px">Offshore temp breaks — best in the Gulf, not the bays. ~daily.</div>
     <div class="muted" id="setOceanDate" style="font-size:12px;margin-top:3px"></div></div>
     <button class="btn sm ghost" id="setOcean" style="width:auto">Off</button></div>
+  </div>
+  <div class="card">
+    <div class="row"><div style="flex:1;min-width:0"><div style="font-weight:700">🌎 Daily satellite imagery</div>
+    <div class="muted" style="font-size:12px">True-color — water clarity, sediment, clean vs. muddy. Date stepper skips cloudy days. ~250 m, daily.</div></div>
+    <button class="btn sm ghost" id="setDaily" style="width:auto">Off</button></div>
   </div>
   <button class="btn ghost" id="setForce">🔄 Force update (clear cache &amp; reload)</button>
   <div class="src" style="margin-top:12px">Salt Spots · data: NOAA CO-OPS tides &amp; water temp, Open-Meteo, NCEI CUDEM bathymetry, NOAA ENC, FL FWC &amp; TX TPWD habitat, NOAA ERDDAP SST/chlorophyll, imagery © Esri, Ollama AI. Scores are guidance — verify on the water.</div>
@@ -363,7 +373,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v26';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v27';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -1035,7 +1045,18 @@ function drawSST(){
   oceanLayer=nl; const drop=()=>{if(old&&old!==nl)map.removeLayer(old);}; nl.on('load',drop); nl.on('error',drop);
 }
 const GIBS_LAYER='VIIRS_NOAA20_CorrectedReflectance_TrueColor';
-function gibsDate(){return new Date(Date.now()-24*36e5).toISOString().slice(0,10);} // yesterday UTC — reliably processed
+const dayMs=864e5;
+function tcMidnight(ms){return new Date(new Date(ms).toISOString().slice(0,10)+'T00:00:00Z');}
+let tcDate=null;
+function setTC(){ // (re)create the GIBS tile layer for tcDate
+  if(oceanKind!=='tc')return;
+  if(oceanLayer){map.removeLayer(oceanLayer);oceanLayer=null;}
+  const ds=tcDate.toISOString().slice(0,10);
+  oceanLayer=L.tileLayer(`https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${GIBS_LAYER}/default/${ds}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg`,
+    {maxNativeZoom:9,maxZoom:20,opacity:1,attribution:'NASA GIBS'}).addTo(map);
+  document.getElementById('tcDateLbl').textContent=tcDate.toLocaleDateString([],{month:'short',day:'numeric',timeZone:'UTC'});
+  document.getElementById('oceanLegend').textContent='🌎 True color (water clarity)';
+}
 function clearOcean(){
   if(oceanLayer){map.removeLayer(oceanLayer);oceanLayer=null;}
   if(oceanMover){map.off('moveend',oceanMover);oceanMover=null;}
@@ -1043,6 +1064,7 @@ function clearOcean(){
   document.getElementById('btnSST').classList.remove('on');
   document.getElementById('btnTC').classList.remove('on');
   document.getElementById('oceanLegend').style.display='none';
+  document.getElementById('tcDateCtl').style.display='none';
 }
 async function toggleOcean(kind){
   const leg=document.getElementById('oceanLegend');
@@ -1057,20 +1079,22 @@ async function toggleOcean(kind){
     drawSST();
   }else if(kind==='tc'){
     oceanKind='tc';document.getElementById('btnTC').classList.add('on');
-    const d=gibsDate();
-    oceanLayer=L.tileLayer(`https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${GIBS_LAYER}/default/{time}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg`,
-      {time:d,maxNativeZoom:9,maxZoom:20,opacity:1,attribution:'NASA GIBS'}).addTo(map);
-    leg.textContent='🌎 True color · '+new Date(d+'T12:00:00Z').toLocaleDateString([],{month:'short',day:'numeric'});leg.style.display='';
-    toast('Loading daily satellite imagery…');
+    if(!tcDate)tcDate=tcMidnight(Date.now()-dayMs); // default: yesterday UTC
+    document.getElementById('tcDateCtl').style.display='flex'; leg.style.display='';
+    toast('Loading daily satellite imagery…'); setTC();
   }
 }
 document.getElementById('btnSST').onclick=()=>toggleOcean('sst');
 document.getElementById('btnTC').onclick=()=>toggleOcean('tc');
-let oceanEnabled=localStorage.getItem('saltspots.ocean')==='on';
+document.getElementById('tcPrev').onclick=()=>{if(oceanKind!=='tc'||!tcDate)return;const nd=new Date(tcDate.getTime()-dayMs);if(nd>=tcMidnight(Date.now()-16*dayMs)){tcDate=nd;setTC();}else toast('16-day limit');};
+document.getElementById('tcNext').onclick=()=>{if(oceanKind!=='tc'||!tcDate)return;const nd=new Date(tcDate.getTime()+dayMs);if(nd<=tcMidnight(Date.now())){tcDate=nd;setTC();}else toast('That’s the latest available');};
+let sstEnabled=localStorage.getItem('saltspots.ocean')==='on';
+let tcEnabled=localStorage.getItem('saltspots.daily')==='on';
 function applyOceanEnabled(){
   const a=document.getElementById('btnSST'),b=document.getElementById('btnTC');
-  if(a)a.style.display=oceanEnabled?'':'none'; if(b)b.style.display=oceanEnabled?'':'none';
-  if(!oceanEnabled&&oceanKind)clearOcean();
+  if(a)a.style.display=sstEnabled?'':'none'; if(b)b.style.display=tcEnabled?'':'none';
+  if(!sstEnabled&&oceanKind==='sst')clearOcean();
+  if(!tcEnabled&&oceanKind==='tc')clearOcean();
 }
 
 /* Depth chart — shaded ~3 m CUDEM bathymetry + selectable contour interval (NCEI DEM_all) */
@@ -1313,8 +1337,9 @@ function openSettings(){
   document.getElementById('setVer').textContent=APP_VERSION;
   document.getElementById('setSync').textContent=syncCode;
   document.getElementById('setUpd').textContent='';
-  document.getElementById('setOcean').textContent=oceanEnabled?'On':'Off';
-  fetchOceanLatest().then(()=>{const e=document.getElementById('setOceanDate');if(e)e.textContent=oceanDate?('Latest satellite image: '+oceanDate):'';});
+  document.getElementById('setOcean').textContent=sstEnabled?'On':'Off';
+  document.getElementById('setDaily').textContent=tcEnabled?'On':'Off';
+  fetchOceanLatest().then(()=>{const e=document.getElementById('setOceanDate');if(e)e.textContent=oceanDate?('Latest SST image: '+oceanDate):'';});
   const el=document.getElementById('setCalib');
   if(!calibWeights){const r=calibrateWeights(); // recompute status
     el.innerHTML='<span class="muted">Using default weights. Log at least 4 catches and 2 slow sessions to calibrate'+(r&&!r.ok?` (have ${r.catches} / ${r.blanks}).`:'.')+'</span>';
@@ -1351,9 +1376,14 @@ document.getElementById('setForce').onclick=forceRefresh;
 document.getElementById('setSyncBtn').onclick=changeSync;
 document.getElementById('setCalibReset').onclick=()=>{resetWeights();openSettings();toast('Reset to default weights');scoreAllSpots().then(()=>renderSpots());};
 document.getElementById('setOcean').onclick=()=>{
-  oceanEnabled=!oceanEnabled;localStorage.setItem('saltspots.ocean',oceanEnabled?'on':'off');
-  applyOceanEnabled();document.getElementById('setOcean').textContent=oceanEnabled?'On':'Off';
-  toast(oceanEnabled?'Ocean layers added to the map':'Ocean layers hidden');
+  sstEnabled=!sstEnabled;localStorage.setItem('saltspots.ocean',sstEnabled?'on':'off');
+  applyOceanEnabled();document.getElementById('setOcean').textContent=sstEnabled?'On':'Off';
+  toast(sstEnabled?'SST button added to the map':'SST hidden');
+};
+document.getElementById('setDaily').onclick=()=>{
+  tcEnabled=!tcEnabled;localStorage.setItem('saltspots.daily',tcEnabled?'on':'off');
+  applyOceanEnabled();document.getElementById('setDaily').textContent=tcEnabled?'On':'Off';
+  toast(tcEnabled?'Daily imagery button added to the map':'Daily imagery hidden');
 };
 
 /* ============================ SPOT DETAIL ============================ */
