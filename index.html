@@ -373,7 +373,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v27';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v28';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -674,7 +674,7 @@ async function getContext(lat,lng){
   // wind tide = observed water level − astronomical prediction; pull the recent OBSERVED series for the chart
   let windTideFt=null, obsPts=[];
   if(tide.station){try{
-    const ow=await fetch(`https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?station=${tide.station.id}&product=water_level&date=recent&datum=MLLW&units=english&time_zone=lst_ldt&format=json`).then(r=>r.json());
+    const ow=await fetchJSONRetry(`https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?station=${tide.station.id}&product=water_level&date=recent&datum=MLLW&units=english&time_zone=lst_ldt&format=json`);
     obsPts=(ow?.data||[]).map(d=>({t:new Date(d.t.replace(' ','T')).getTime(),v:+d.v})).filter(p=>!isNaN(p.v));
     if(obsPts.length){const last=obsPts[obsPts.length-1],pred=heightAt(tide,new Date(last.t));if(pred!=null)windTideFt=Math.round((last.v-pred)*100)/100;}
   }catch(e){}}
@@ -694,7 +694,8 @@ async function getContext(lat,lng){
     sunFor:t=>{const ds=ymd(t);return sunDays.find(x=>x.date===ds)||sunDays[0];},
     moonFor:t=>moonSolunar(lat,lng,t),
   };
-  ctxCache[key]=ctx; return ctx;
+  if(!tide.failed)ctxCache[key]=ctx; // don't cache a failed tide fetch — let it retry next time
+  return ctx;
 }
 let _stream={cfs:undefined,_t:0};
 async function fetchStreamflow(lat,lng){ // TX central-coast freshwater inflow proxy (Guadalupe R @ Victoria)
@@ -711,27 +712,42 @@ async function fetchWaterTemp(lat,lng){
     if(!_wtStations)_wtStations=await stationList('watertemp');
     const st=nearest(_wtStations,lat,lng); if(!st||st.dist>75)return null; // bay temps are regionally similar
     const u=`https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?station=${st.id}&product=water_temperature&date=latest&units=english&time_zone=lst_ldt&format=json`;
-    const j=await fetch(u).then(r=>r.json());
+    const j=await fetchJSONRetry(u);
     const v=j?.data?.[0]?.v; return v!=null?Math.round(+v):null;
   }catch(e){return null}
 }
+// resilient JSON fetch — retries transient failures (NOAA CO-OPS 504s often) and rejects HTML error pages
+async function fetchJSONRetry(url,tries=3,timeoutMs=11000){
+  for(let i=0;i<tries;i++){
+    try{
+      const ctl=new AbortController(),to=setTimeout(()=>ctl.abort(),timeoutMs);
+      const r=await fetch(url,{signal:ctl.signal});clearTimeout(to);
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      const txt=await r.text(); if(/^\s*</.test(txt))throw new Error('non-JSON');
+      return JSON.parse(txt);
+    }catch(e){ if(i===tries-1)return null; await new Promise(res=>setTimeout(res,500*(i+1))); }
+  }
+  return null;
+}
 async function fetchTide(lat,lng,d0,d2){
-  const empty={pts:[],hilo:[],station:null,minV:0,maxV:0,range:0,maxSlope:0};
+  const empty={pts:[],hilo:[],station:null,minV:0,maxV:0,range:0,maxSlope:0,failed:false};
   try{
     if(!_tideStations)_tideStations=await stationList('tidepredictions');
+    if(!_tideStations)return {...empty,failed:true};
     const st=nearest(_tideStations,lat,lng); if(!st)return empty;
     const base=`https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?station=${st.id}&product=predictions&datum=MLLW&time_zone=lst_ldt&units=english&format=json`;
     const [curve,hilo]=await Promise.all([
-      fetch(`${base}&interval=30&begin_date=${d0}&end_date=${d2}`).then(r=>r.json()),
-      fetch(`${base}&interval=hilo&begin_date=${d0}&end_date=${d2}`).then(r=>r.json())
+      fetchJSONRetry(`${base}&interval=30&begin_date=${d0}&end_date=${d2}`),
+      fetchJSONRetry(`${base}&interval=hilo&begin_date=${d0}&end_date=${d2}`)
     ]);
+    if(!curve||!curve.predictions)return {...empty,station:st,failed:true}; // station exists, NOAA data fetch failed
     const pts=(curve.predictions||[]).map(p=>({t:new Date(p.t.replace(' ','T')).getTime(),v:+p.v}));
-    const events=(hilo.predictions||[]).map(p=>({t:p.t,v:+p.v,hl:p.type}));
+    const events=((hilo&&hilo.predictions)||[]).map(p=>({t:p.t,v:+p.v,hl:p.type}));
     const vs=pts.map(p=>p.v),minV=Math.min(...vs),maxV=Math.max(...vs);
-    const o={pts,hilo:events,station:st,minV,maxV,range:maxV-minV||1,maxSlope:0};
+    const o={pts,hilo:events,station:st,minV,maxV,range:maxV-minV||1,maxSlope:0,failed:false};
     let mx=0;for(let i=2;i<pts.length-2;i++){const s=Math.abs(slopeAt(o,new Date(pts[i].t)));if(s>mx)mx=s;}
     o.maxSlope=mx||1; return o;
-  }catch(e){return empty}
+  }catch(e){return {...empty,failed:true}}
 }
 
 /* moon transit/rise/set + solunar majors/minors for a given day */
@@ -1467,7 +1483,7 @@ function tideStat(ctx){
 function winSpan(a,b){const sd=a.toLocaleDateString([],{weekday:'short'});const ad=new Date();const sameDay=a.toDateString()===ad.toDateString();const tmrw=a.toDateString()===new Date(ad.getTime()+864e5).toDateString();const pre=sameDay?'Today':tmrw?'Tom':sd;return `${pre} ${fmtDate(a)}–${fmtDate(b)}`;}
 function tideChartCard(ctx){
   const t=ctx.tide;
-  if(!t.pts.length)return '<div class="card"><div style="font-weight:800;margin-bottom:4px">Tide</div><div class="muted" style="font-size:13px">No tide station nearby.</div></div>';
+  if(!t.pts.length)return `<div class="card"><div style="font-weight:800;margin-bottom:4px">Tide</div><div class="muted" style="font-size:13px">${(t.failed||t.station)?'Tide data temporarily unavailable — NOAA’s service is timing out. Try again shortly.':'No tide station nearby.'}</div></div>`;
   const now=Date.now(), t0=now-14*36e5, t1=now+22*36e5;       // 36h: 14h observed history + 22h ahead
   const pts=t.pts.filter(p=>p.t>=t0&&p.t<=t1); if(pts.length<2)return '';
   const obs=(ctx.obsPts||[]).filter(p=>p.t>=t0&&p.t<=t1);
@@ -1725,8 +1741,8 @@ document.getElementById('lureImg').onchange=async(e)=>{
 let _tideStations=null,_wtStations=null;
 async function stationList(type){
   const url=`https://api.tidesandcurrents.noaa.gov/mdapi/prod/webapi/stations.json?type=${type}`;
-  const j=await fetch(url).then(r=>r.json());
-  return j.stations.map(s=>({id:s.id,name:s.name,lat:+s.lat,lng:+s.lng}));
+  const j=await fetchJSONRetry(url);
+  return (j&&j.stations)?j.stations.map(s=>({id:s.id,name:s.name,lat:+s.lat,lng:+s.lng})):null;
 }
 function nearest(list,lat,lng){let best=null,bd=1e9;for(const s of list){const d=hav(lat,lng,s.lat,s.lng);if(d<bd){bd=d;best=s}}return best?{...best,dist:bd}:null;}
 function hav(a,b,c,d){const R=3959,t=x=>x*Math.PI/180;const dla=t(c-a),dlo=t(d-b);const x=Math.sin(dla/2)**2+Math.cos(t(a))*Math.cos(t(c))*Math.sin(dlo/2)**2;return 2*R*Math.asin(Math.sqrt(x))}
