@@ -304,6 +304,11 @@
   </div>
   <label class="fld">Bait / lure (optional)</label>
   <input class="in" id="logBait" placeholder="e.g. gold spoon, live shrimp, paddletail">
+  <div class="row" style="margin-top:7px;gap:9px">
+    <button class="btn sm ghost" id="lureBtn" style="width:auto">📷 Identify from photo</button>
+    <span id="lureOut" class="muted" style="font-size:12px;flex:1;min-width:0"></span>
+  </div>
+  <input type="file" id="lureImg" accept="image/*" capture="environment" style="display:none">
   <label class="fld">Notes (optional)</label>
   <textarea class="in" id="logNotes" placeholder="where on the spot, what they were doing…"></textarea>
   <div class="muted" id="logCond" style="font-size:12px;margin:10px 2px">📍 Conditions (tide, wind tide, water temp, etc.) are pulled automatically for the date &amp; time you set — backdate it and it fetches that day's history.</div>
@@ -357,7 +362,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v24';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v25';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -1540,6 +1545,7 @@ function openLog(o){
   document.getElementById('logLen').value=ed&&ed.length_in!=null?ed.length_in:'';
   document.getElementById('logBait').value=ed&&ed.bait?ed.bait:'';
   document.getElementById('logNotes').value=ed&&ed.notes?ed.notes:'';
+  document.getElementById('lureOut').textContent='';
   const sp=document.getElementById('logSpecies');sp.innerHTML='';
   SPECIES.forEach(s=>{const el=document.createElement('button');el.className='pick'+(lc.species===s?' on':'');el.textContent=s;el.onclick=()=>{sp.querySelectorAll('.pick').forEach(p=>p.classList.remove('on'));el.classList.add('on');logState.species=s;};sp.appendChild(el);});
   document.getElementById('logBlank').style.display=ed?'none':'';
@@ -1630,6 +1636,38 @@ document.getElementById('logDelete').onclick=()=>{
   if(!confirm('Delete this entry?'))return;
   removeCatch(lc.editId);catches=catches.filter(x=>x.id!==lc.editId);saveCatches();
   document.getElementById('logBg').classList.remove('open');toast('Entry deleted');calibrateWeights();renderCatches();scoreAllSpots().then(()=>renderSpots());logState=null;
+};
+
+/* ---- Lure recognition: photo → Ollama vision (gemma3) → fills the bait field ---- */
+const LURE_URL=SB_URL+'/functions/v1/lure-vision';
+function downscaleToBase64(file,maxDim,quality){
+  return new Promise((res,rej)=>{
+    const img=new Image(),url=URL.createObjectURL(file);
+    img.onload=()=>{let w=img.width,h=img.height;const sc=Math.min(1,maxDim/Math.max(w,h));w=Math.round(w*sc);h=Math.round(h*sc);
+      const cv=document.createElement('canvas');cv.width=w;cv.height=h;cv.getContext('2d').drawImage(img,0,0,w,h);
+      URL.revokeObjectURL(url);try{res(cv.toDataURL('image/jpeg',quality));}catch(e){rej(e);}};
+    img.onerror=()=>{URL.revokeObjectURL(url);rej(new Error('image load failed'));};img.src=url;});
+}
+function parseLure(t){try{const m=(t||'').match(/\{[\s\S]*\}/);if(m)return JSON.parse(m[0]);}catch(e){}return null;}
+document.getElementById('lureBtn').onclick=()=>document.getElementById('lureImg').click();
+document.getElementById('lureImg').onchange=async(e)=>{
+  const file=e.target.files&&e.target.files[0]; if(!file)return;
+  const out=document.getElementById('lureOut'),btn=document.getElementById('lureBtn');
+  btn.disabled=true;out.textContent='📷 Reading lure…';
+  try{
+    const b64=await downscaleToBase64(file,768,0.8);
+    const r=await fetch(LURE_URL,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+SB_ANON,'apikey':SB_ANON},
+      body:JSON.stringify({model:'gemma3:12b',image:b64})}).then(r=>r.json());
+    if(r.error){out.textContent='Couldn’t read it ('+esc(String(r.error)).slice(0,40)+')';}
+    else{
+      const p=parseLure(r.text);
+      if(p){const label=[p.color,p.style].filter(Boolean).join(' ').trim();
+        if(label)document.getElementById('logBait').value=label;
+        out.innerHTML='✓ '+esc(label||'(unclear)')+(p.brand?' · '+esc(p.brand):'')+(p.confidence!=null?` <span class="muted">${Math.round(p.confidence*100)}%</span>`:'');
+      }else{const tx=(r.text||'').slice(0,60);if(tx)document.getElementById('logBait').value=tx;out.textContent=tx||'No reading';}
+    }
+  }catch(err){out.textContent='Vision failed: '+(err.message||'');}
+  btn.disabled=false;e.target.value='';
 };
 
 /* ============================ DATA HELPERS ============================ */
