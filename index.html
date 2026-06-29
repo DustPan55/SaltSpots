@@ -205,6 +205,7 @@
         <button id="btnGrass">🌿 Grass</button>
         <button id="btnDepth">🌊 Depth</button>
         <button id="btnSST">🌡️ SST</button>
+        <button id="btnTC">🌎 Daily</button>
       </div>
       <div class="legend"><span><span class="d" style="background:var(--green)"></span>Hot</span><span><span class="d" style="background:var(--amber)"></span>Fair</span><span><span class="d" style="background:var(--grey)"></span>Slow</span></div>
       <div class="legend" id="oceanLegend" style="left:auto;right:10px;bottom:38px;display:none"></div>
@@ -343,8 +344,8 @@
     <div style="height:8px"></div><button class="btn sm ghost" id="setCalibReset" style="width:auto">Reset to defaults</button>
   </div>
   <div class="card">
-    <div class="row"><div style="flex:1;min-width:0"><div style="font-weight:700">Ocean SST layer</div>
-    <div class="muted" style="font-size:12px">Offshore temp breaks — best in the Gulf, not the bays. New imagery ~once a day.</div>
+    <div class="row"><div style="flex:1;min-width:0"><div style="font-weight:700">Ocean layers</div>
+    <div class="muted" style="font-size:12px">SST (offshore temp breaks) + 🌎 daily true-color imagery (water clarity / sediment). New imagery ~once a day.</div>
     <div class="muted" id="setOceanDate" style="font-size:12px;margin-top:3px"></div></div>
     <button class="btn sm ghost" id="setOcean" style="width:auto">Off</button></div>
   </div>
@@ -362,7 +363,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v25';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v26';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -1013,7 +1014,7 @@ document.getElementById('btnAgent').onclick=runPatternAgent;
 
 /* Ocean overlay — NOAA ERDDAP SST (MUR 1km, current & gap-filled), 4326 WMS image, refresh on move.
    (Chlorophyll dropped: free sources were either stale (MODIS, 2022) or render empty over the Gulf.) */
-let oceanLayer=null, oceanOn=false, oceanMover=null, oceanTimer=null, oceanIso=null, oceanDate='';
+let oceanLayer=null, oceanKind=null, oceanMover=null, oceanTimer=null, oceanIso=null, oceanDate='';
 const OCEAN_DS='jplMURSST41', OCEAN_V='analysed_sst';
 async function fetchOceanLatest(){
   if(oceanIso)return oceanIso;
@@ -1027,29 +1028,49 @@ function oceanUrl(){
   const bbox=`${b.getWest()},${b.getSouth()},${b.getEast()},${b.getNorth()}`;
   return `https://coastwatch.pfeg.noaa.gov/erddap/wms/${OCEAN_DS}/request?service=WMS&version=1.1.1&request=GetMap&srs=EPSG:4326&bbox=${bbox}&layers=${OCEAN_DS}:${OCEAN_V}&styles=&format=image/png&transparent=true&width=${w}&height=${h}${oceanIso?'&time='+encodeURIComponent(oceanIso):''}`;
 }
-function drawOcean(){
-  if(!oceanOn)return;
+function drawSST(){
+  if(oceanKind!=='sst')return;
   const b=map.getBounds(),old=oceanLayer;
   const nl=L.imageOverlay(oceanUrl(),b,{opacity:0.6,interactive:false}).addTo(map);
-  oceanLayer=nl; const drop=()=>{if(old)map.removeLayer(old);}; nl.on('load',drop); nl.on('error',drop);
+  oceanLayer=nl; const drop=()=>{if(old&&old!==nl)map.removeLayer(old);}; nl.on('load',drop); nl.on('error',drop);
 }
-async function toggleOcean(){
-  const btn=document.getElementById('btnSST'),leg=document.getElementById('oceanLegend');
-  if(oceanOn){if(oceanLayer)map.removeLayer(oceanLayer);oceanLayer=null;oceanOn=false;map.off('moveend',oceanMover);btn.classList.remove('on');leg.style.display='none';return;}
-  if(map.getZoom()<7){toast('Zoom out a touch — SST is a regional layer');return;}
-  oceanOn=true;btn.classList.add('on');
-  if(!oceanMover)oceanMover=()=>{clearTimeout(oceanTimer);oceanTimer=setTimeout(drawOcean,300);};
-  map.off('moveend',oceanMover);map.on('moveend',oceanMover);
-  toast('Loading sea-surface temp…');
-  await fetchOceanLatest();
-  leg.textContent='🌡️ SST cool → warm'+(oceanDate?'  ·  image '+oceanDate:'');leg.style.display='';
-  drawOcean();
+const GIBS_LAYER='VIIRS_NOAA20_CorrectedReflectance_TrueColor';
+function gibsDate(){return new Date(Date.now()-24*36e5).toISOString().slice(0,10);} // yesterday UTC — reliably processed
+function clearOcean(){
+  if(oceanLayer){map.removeLayer(oceanLayer);oceanLayer=null;}
+  if(oceanMover){map.off('moveend',oceanMover);oceanMover=null;}
+  oceanKind=null;
+  document.getElementById('btnSST').classList.remove('on');
+  document.getElementById('btnTC').classList.remove('on');
+  document.getElementById('oceanLegend').style.display='none';
 }
-document.getElementById('btnSST').onclick=toggleOcean;
+async function toggleOcean(kind){
+  const leg=document.getElementById('oceanLegend');
+  if(oceanKind===kind){clearOcean();return;}
+  clearOcean();
+  if(kind==='sst'){
+    if(map.getZoom()<7){toast('Zoom out a touch — SST is a regional layer');return;}
+    oceanKind='sst';document.getElementById('btnSST').classList.add('on');
+    oceanMover=()=>{clearTimeout(oceanTimer);oceanTimer=setTimeout(drawSST,300);};map.on('moveend',oceanMover);
+    toast('Loading sea-surface temp…'); await fetchOceanLatest();
+    leg.textContent='🌡️ SST cool → warm'+(oceanDate?'  ·  '+oceanDate:'');leg.style.display='';
+    drawSST();
+  }else if(kind==='tc'){
+    oceanKind='tc';document.getElementById('btnTC').classList.add('on');
+    const d=gibsDate();
+    oceanLayer=L.tileLayer(`https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${GIBS_LAYER}/default/{time}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg`,
+      {time:d,maxNativeZoom:9,maxZoom:20,opacity:1,attribution:'NASA GIBS'}).addTo(map);
+    leg.textContent='🌎 True color · '+new Date(d+'T12:00:00Z').toLocaleDateString([],{month:'short',day:'numeric'});leg.style.display='';
+    toast('Loading daily satellite imagery…');
+  }
+}
+document.getElementById('btnSST').onclick=()=>toggleOcean('sst');
+document.getElementById('btnTC').onclick=()=>toggleOcean('tc');
 let oceanEnabled=localStorage.getItem('saltspots.ocean')==='on';
 function applyOceanEnabled(){
-  const a=document.getElementById('btnSST'); if(a)a.style.display=oceanEnabled?'':'none';
-  if(!oceanEnabled&&oceanOn)toggleOcean(); // turn off active layer
+  const a=document.getElementById('btnSST'),b=document.getElementById('btnTC');
+  if(a)a.style.display=oceanEnabled?'':'none'; if(b)b.style.display=oceanEnabled?'':'none';
+  if(!oceanEnabled&&oceanKind)clearOcean();
 }
 
 /* Depth chart — shaded ~3 m CUDEM bathymetry + selectable contour interval (NCEI DEM_all) */
