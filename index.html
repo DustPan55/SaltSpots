@@ -327,7 +327,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v17';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v18';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -625,12 +625,12 @@ async function getContext(lat,lng){
   // water-temp trend (°F): today's daily mean vs 2 days ago
   const dMean=daily.temperature_2m_mean||[], dTime=daily.time||[], ti=dTime.indexOf(ymd(new Date()));
   const tempTrendF=(ti>=2&&dMean[ti]!=null&&dMean[ti-2]!=null)?Math.round((dMean[ti]-dMean[ti-2])*10)/10:null;
-  // wind tide = observed water level − astronomical prediction (uses the curve we already have)
-  let windTideFt=null;
+  // wind tide = observed water level − astronomical prediction; pull the recent OBSERVED series for the chart
+  let windTideFt=null, obsPts=[];
   if(tide.station){try{
-    const ow=await fetch(`https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?station=${tide.station.id}&product=water_level&date=latest&datum=MLLW&units=english&time_zone=lst_ldt&format=json`).then(r=>r.json());
-    const d=ow?.data?.[0];
-    if(d&&d.v!=null){const ot=new Date(d.t.replace(' ','T')),pred=heightAt(tide,ot);if(pred!=null)windTideFt=Math.round((+d.v-pred)*100)/100;}
+    const ow=await fetch(`https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?station=${tide.station.id}&product=water_level&date=recent&datum=MLLW&units=english&time_zone=lst_ldt&format=json`).then(r=>r.json());
+    obsPts=(ow?.data||[]).map(d=>({t:new Date(d.t.replace(' ','T')).getTime(),v:+d.v})).filter(p=>!isNaN(p.v));
+    if(obsPts.length){const last=obsPts[obsPts.length-1],pred=heightAt(tide,new Date(last.t));if(pred!=null)windTideFt=Math.round((last.v-pred)*100)/100;}
   }catch(e){}}
 
   const ctx={
@@ -638,7 +638,7 @@ async function getContext(lat,lng){
     water: wtemp!=null?wtemp:(mar?.current?.sea_surface_temperature!=null?Math.round(mar.current.sea_surface_temperature*9/5+32):null),
     waterSrc: wtemp!=null?'NOAA station':(mar?.current?.sea_surface_temperature!=null?'satellite SST':''),
     cur, mar:mar?.current||{}, summer:[5,6,7,8,9].includes(new Date().getMonth()), month:new Date().getMonth(),
-    moonIllum:moonI.illum, moon:moonI,
+    moonIllum:moonI.illum, moon:moonI, obsPts,
     cloudNow: cur.cloud_cover!=null?cur.cloud_cover:null, windTideFt, streamCfs: stream, tempTrendF,
     windAt:t=>hWind.length?hWind[nearH(t)]:(cur.wind_speed_10m??null),
     pressAt:t=>hPress.length?hPress[nearH(t)]:(cur.pressure_msl??null),
@@ -1283,36 +1283,37 @@ function winSpan(a,b){const sd=a.toLocaleDateString([],{weekday:'short'});const 
 function tideChartCard(ctx){
   const t=ctx.tide;
   if(!t.pts.length)return '<div class="card"><div style="font-weight:800;margin-bottom:4px">Tide</div><div class="muted" style="font-size:13px">No tide station nearby.</div></div>';
-  const now=Date.now(), t0=now-3*36e5, t1=now+27*36e5;       // ~30h window
+  const now=Date.now(), t0=now-14*36e5, t1=now+22*36e5;       // 36h: 14h observed history + 22h ahead
   const pts=t.pts.filter(p=>p.t>=t0&&p.t<=t1); if(pts.length<2)return '';
-  const vs=pts.map(p=>p.v); let mn=Math.min(...vs),mx=Math.max(...vs); const pad=(mx-mn)*0.18||0.3; mn-=pad;mx+=pad;
-  const W=320,H=132,padL=4,padR=4,padT=12,padB=20;
+  const obs=(ctx.obsPts||[]).filter(p=>p.t>=t0&&p.t<=t1);
+  const allV=pts.map(p=>p.v).concat(obs.map(p=>p.v));
+  let mn=Math.min(...allV),mx=Math.max(...allV); const pad=(mx-mn)*0.18||0.3; mn-=pad;mx+=pad;
+  const W=320,H=140,padL=4,padR=4,padT=12,padB=22;
   const X=ms=>padL+((ms-t0)/(t1-t0))*(W-padL-padR), Y=v=>padT+(1-(v-mn)/(mx-mn))*(H-padT-padB);
-  const line=pts.map((p,i)=>(i?'L':'M')+X(p.t).toFixed(1)+' '+Y(p.v).toFixed(1)).join(' ');
+  const poly=arr=>arr.map((p,i)=>(i?'L':'M')+X(p.t).toFixed(1)+' '+Y(p.v).toFixed(1)).join(' ');
+  const line=poly(pts);
   const area=line+` L ${X(pts[pts.length-1].t).toFixed(1)} ${H-padB} L ${X(pts[0].t).toFixed(1)} ${H-padB} Z`;
+  const obsLine=obs.length>1?`<path d="${poly(obs)}" fill="none" stroke="#f59e0b" stroke-width="2"/>`:'';
   const ev=(t.hilo||[]).map(e=>({hl:e.type,v:+e.v,ms:new Date(e.t.replace(' ','T')).getTime(),t:e.t})).filter(e=>e.ms>=t0&&e.ms<=t1);
   let marks='';
   for(const e of ev){const x=X(e.ms),y=Y(e.v);
     marks+=`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="${e.hl==='H'?'#0d7d8f':'#3b82f6'}"/>`+
       `<text x="${x.toFixed(1)}" y="${(y+(e.hl==='H'?-6:14)).toFixed(1)}" font-size="9" fill="#5f7a82" text-anchor="middle">${esc(fmtTshort(e.t))} ${e.v.toFixed(1)}'</text>`;
   }
-  const nowX=X(now), predNow=heightAt(t,new Date(now));
-  let obs='', legend='';
+  const nowX=X(now);
+  const nowDot=obs.length?`<circle cx="${nowX.toFixed(1)}" cy="${Y(obs[obs.length-1].v).toFixed(1)}" r="3.8" fill="#f59e0b" stroke="#fff" stroke-width="1.5"/>`:'';
   const wt=ctx.windTideFt;
-  if(wt!=null&&predNow!=null){const obsV=predNow+wt,oy=Y(obsV),py=Y(predNow);
-    obs=`<line x1="${nowX.toFixed(1)}" y1="${py.toFixed(1)}" x2="${nowX.toFixed(1)}" y2="${oy.toFixed(1)}" stroke="#e08a00" stroke-width="2"/>`+
-      `<circle cx="${nowX.toFixed(1)}" cy="${oy.toFixed(1)}" r="3.6" fill="#f59e0b" stroke="#fff" stroke-width="1.5"/>`;
-  }
-  const wtTxt = wt==null ? '<span class="muted">Wind tide: — (observed level unavailable)</span>'
-    : `Wind tide <b style="color:#c47a00">${wt>0?'+':''}${wt.toFixed(1)} ft</b> — actual water is ${wt>0.1?'higher than predicted (wind pushing in)':wt<-0.1?'lower than predicted (wind blowing out)':'right on prediction'}`;
+  const wtTxt = wt==null ? '<span class="muted">Wind tide: — (observed level unavailable right now)</span>'
+    : `Wind tide now <b style="color:#c47a00">${wt>0?'+':''}${wt.toFixed(1)} ft</b> — water ${wt>0.1?'higher than predicted (wind pushing in)':wt<-0.1?'lower than predicted (blown out)':'right on prediction'}. Gap between the lines = the wind effect.`;
   return `<div class="card">
     <div class="row" style="margin-bottom:2px"><div style="font-weight:800">Tide${ctx.tide.station?` · ${esc(ctx.tide.station.name)}`:''}</div>
-      <span style="margin-left:auto;font-size:11px;color:var(--muted)"><span style="color:#0d7d8f">━</span> predicted &nbsp;<span style="color:#f59e0b">●</span> now</span></div>
+      <span style="margin-left:auto;font-size:11px;color:var(--muted)"><span style="color:#0d7d8f">━</span> predicted &nbsp;<span style="color:#f59e0b">━</span> actual</span></div>
     <svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block" preserveAspectRatio="none" height="${H}">
-      <defs><linearGradient id="tg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#13a3b8" stop-opacity=".25"/><stop offset="1" stop-color="#13a3b8" stop-opacity="0"/></linearGradient></defs>
+      <defs><linearGradient id="tg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#13a3b8" stop-opacity=".22"/><stop offset="1" stop-color="#13a3b8" stop-opacity="0"/></linearGradient></defs>
       <path d="${area}" fill="url(#tg)"/><path d="${line}" fill="none" stroke="#0d7d8f" stroke-width="2"/>
+      ${obsLine}
       <line x1="${nowX.toFixed(1)}" y1="${padT}" x2="${nowX.toFixed(1)}" y2="${H-padB}" stroke="#0e2a32" stroke-width="1" stroke-dasharray="3 3" opacity=".35"/>
-      ${marks}${obs}</svg>
+      ${marks}${nowDot}</svg>
     <div style="font-size:12.5px;margin-top:6px">${wtTxt}</div></div>`;
 }
 function fmtTshort(t){const d=new Date(t.replace(' ','T'));let h=d.getHours();const ap=h>=12?'p':'a';h=h%12||12;return h+ap;}
