@@ -373,7 +373,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v28';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v29';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -740,15 +740,22 @@ async function fetchTide(lat,lng,d0,d2){
       fetchJSONRetry(`${base}&interval=30&begin_date=${d0}&end_date=${d2}`),
       fetchJSONRetry(`${base}&interval=hilo&begin_date=${d0}&end_date=${d2}`)
     ]);
-    if(!curve||!curve.predictions)return {...empty,station:st,failed:true}; // station exists, NOAA data fetch failed
+    if(!curve||!curve.predictions){ // predictions service down → reuse cached curve (tides are deterministic, still valid)
+      const c=loadTideCache(st.id);
+      if(c&&c.pts.length&&c.pts[0].t<=Date.now()&&c.pts[c.pts.length-1].t>=Date.now())return {...c,station:st,failed:false,stale:true};
+      return {...empty,station:st,failed:true};
+    }
     const pts=(curve.predictions||[]).map(p=>({t:new Date(p.t.replace(' ','T')).getTime(),v:+p.v}));
     const events=((hilo&&hilo.predictions)||[]).map(p=>({t:p.t,v:+p.v,hl:p.type}));
     const vs=pts.map(p=>p.v),minV=Math.min(...vs),maxV=Math.max(...vs);
     const o={pts,hilo:events,station:st,minV,maxV,range:maxV-minV||1,maxSlope:0,failed:false};
     let mx=0;for(let i=2;i<pts.length-2;i++){const s=Math.abs(slopeAt(o,new Date(pts[i].t)));if(s>mx)mx=s;}
-    o.maxSlope=mx||1; return o;
+    o.maxSlope=mx||1; saveTideCache(st.id,o); return o;
   }catch(e){return {...empty,failed:true}}
 }
+function tideCacheKey(id){return 'saltspots.tide.'+id;}
+function saveTideCache(id,o){try{localStorage.setItem(tideCacheKey(id),JSON.stringify({pts:o.pts,hilo:o.hilo,station:o.station,minV:o.minV,maxV:o.maxV,range:o.range,maxSlope:o.maxSlope}));}catch(e){}}
+function loadTideCache(id){try{return JSON.parse(localStorage.getItem(tideCacheKey(id)));}catch(e){return null}}
 
 /* moon transit/rise/set + solunar majors/minors for a given day */
 function moonSolunar(lat,lng,t){
@@ -1740,9 +1747,11 @@ document.getElementById('lureImg').onchange=async(e)=>{
 /* ============================ DATA HELPERS ============================ */
 let _tideStations=null,_wtStations=null;
 async function stationList(type){
-  const url=`https://api.tidesandcurrents.noaa.gov/mdapi/prod/webapi/stations.json?type=${type}`;
-  const j=await fetchJSONRetry(url);
-  return (j&&j.stations)?j.stations.map(s=>({id:s.id,name:s.name,lat:+s.lat,lng:+s.lng})):null;
+  const lsk='saltspots.stations.'+type;
+  const j=await fetchJSONRetry(`https://api.tidesandcurrents.noaa.gov/mdapi/prod/webapi/stations.json?type=${type}`);
+  if(j&&j.stations){const arr=j.stations.map(s=>({id:s.id,name:s.name,lat:+s.lat,lng:+s.lng}));try{localStorage.setItem(lsk,JSON.stringify(arr));}catch(e){}return arr;}
+  try{const c=JSON.parse(localStorage.getItem(lsk));if(c&&c.length)return c;}catch(e){} // fall back to cached list if mdapi is down
+  return null;
 }
 function nearest(list,lat,lng){let best=null,bd=1e9;for(const s of list){const d=hav(lat,lng,s.lat,s.lng);if(d<bd){bd=d;best=s}}return best?{...best,dist:bd}:null;}
 function hav(a,b,c,d){const R=3959,t=x=>x*Math.PI/180;const dla=t(c-a),dlo=t(d-b);const x=Math.sin(dla/2)**2+Math.cos(t(a))*Math.cos(t(c))*Math.sin(dlo/2)**2;return 2*R*Math.asin(Math.sqrt(x))}
