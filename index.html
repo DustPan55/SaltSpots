@@ -206,6 +206,7 @@
         <button id="btnDepth">🌊 Depth</button>
         <button id="btnSST">🌡️ SST</button>
         <button id="btnTC">🌊 Flats</button>
+        <button id="btnRecent">📡 Recent</button>
       </div>
       <div class="legend"><span><span class="d" style="background:var(--green)"></span>Hot</span><span><span class="d" style="background:var(--amber)"></span>Fair</span><span><span class="d" style="background:var(--grey)"></span>Slow</span></div>
       <div class="legend" id="oceanLegend" style="left:auto;right:10px;bottom:38px;display:none"></div>
@@ -356,7 +357,7 @@
   </div>
   <div class="card">
     <div class="row"><div style="flex:1;min-width:0"><div style="font-weight:700">🌊 Sentinel-2 imagery (10 m)</div>
-    <div class="muted" style="font-size:12px">High-res cloud-free view — see flats, bars, guts &amp; channels. Static composite (clearest view, not today's water); step the year to compare.</div></div>
+    <div class="muted" style="font-size:12px">Two buttons: <b>🌊 Flats</b> = clean cloud-free composite (structure); <b>📡 Recent</b> = the latest real dated pass via Copernicus (current water, but cloudier). Step the date/year.</div></div>
     <button class="btn sm ghost" id="setDaily" style="width:auto">Off</button></div>
   </div>
   <button class="btn ghost" id="setForce">🔄 Force update (clear cache &amp; reload)</button>
@@ -373,7 +374,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v31';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v32';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -1078,12 +1079,34 @@ function setTC(){
   document.getElementById('tcDateLbl').textContent=tcYear;
   document.getElementById('oceanLegend').textContent='🌊 Sentinel-2 10 m · flats & structure';
 }
+// Recent dated Sentinel-2 via Copernicus (edge fn renders the actual clear pass)
+let recentDates=[],recentIdx=0,recentDate=null,recentObjUrl=null;
+async function fetchRecentDates(){
+  const b=map.getBounds(),crs=map.options.crs,sw=crs.project(b.getSouthWest()),ne=crs.project(b.getNorthEast());
+  try{const j=await fetch(`${SB_URL}/functions/v1/sentinel?mode=dates&bbox=${sw.x},${sw.y},${ne.x},${ne.y}&days=50`,{headers:{'Authorization':'Bearer '+SB_ANON,'apikey':SB_ANON}}).then(r=>r.json());recentDates=(j&&j.dates)||[];}catch(e){recentDates=[];}
+}
+async function drawRecent(){
+  if(oceanKind!=='recent')return;
+  const b=map.getBounds(),crs=map.options.crs,sw=crs.project(b.getSouthWest()),ne=crs.project(b.getNorthEast()),s=map.getSize();
+  const sc=Math.min(1,1024/Math.max(s.x,s.y)),w=Math.round(s.x*sc),h=Math.round(s.y*sc);
+  const url=`${SB_URL}/functions/v1/sentinel?mode=image&bbox=${sw.x},${sw.y},${ne.x},${ne.y}&w=${w}&h=${h}${recentDate?'&date='+recentDate:''}`;
+  let blob=null;try{const r=await fetch(url,{headers:{'Authorization':'Bearer '+SB_ANON,'apikey':SB_ANON}});if(r.ok&&(r.headers.get('content-type')||'').includes('image'))blob=await r.blob();}catch(e){}
+  if(!blob||oceanKind!=='recent')return;
+  const obj=URL.createObjectURL(blob),old=oceanLayer,oldUrl=recentObjUrl;
+  const nl=L.imageOverlay(obj,b,{opacity:1,interactive:false}).addTo(map);
+  oceanLayer=nl;recentObjUrl=obj;
+  nl.on('load',()=>{if(old&&old!==nl)map.removeLayer(old);if(oldUrl)URL.revokeObjectURL(oldUrl);});
+}
+function recentLabel(){const d=recentDates[recentIdx];
+  document.getElementById('tcDateLbl').textContent=d?(new Date(d.date+'T12:00:00Z').toLocaleDateString([],{month:'short',day:'numeric'})+' · '+d.cloud+'%☁'):'—';
+  document.getElementById('oceanLegend').textContent='📡 Sentinel-2 recent pass';
+}
 function clearOcean(){
   if(oceanLayer){map.removeLayer(oceanLayer);oceanLayer=null;}
+  if(recentObjUrl){URL.revokeObjectURL(recentObjUrl);recentObjUrl=null;}
   if(oceanMover){map.off('moveend',oceanMover);oceanMover=null;}
   oceanKind=null;
-  document.getElementById('btnSST').classList.remove('on');
-  document.getElementById('btnTC').classList.remove('on');
+  ['btnSST','btnTC','btnRecent'].forEach(id=>document.getElementById(id).classList.remove('on'));
   document.getElementById('oceanLegend').style.display='none';
   document.getElementById('tcDateCtl').style.display='none';
 }
@@ -1102,19 +1125,39 @@ async function toggleOcean(kind){
     oceanKind='tc';document.getElementById('btnTC').classList.add('on');
     document.getElementById('tcDateCtl').style.display='flex'; leg.style.display='';
     toast('Loading Sentinel-2 10 m imagery…'); setTC();
+  }else if(kind==='recent'){
+    if(map.getZoom()<9){toast('Zoom into a bay first for Recent imagery');return;}
+    oceanKind='recent';document.getElementById('btnRecent').classList.add('on');
+    document.getElementById('tcDateCtl').style.display='flex';leg.style.display='';leg.textContent='📡 finding recent passes…';
+    document.getElementById('tcDateLbl').textContent='…';
+    toast('Finding recent Sentinel-2 passes…');
+    await fetchRecentDates();
+    if(oceanKind!=='recent')return;
+    if(!recentDates.length){clearOcean();toast('No recent passes found here');return;}
+    recentIdx=0;recentDate=recentDates[0].date;recentLabel();
+    document.getElementById('tcDateLbl').textContent='rendering…';
+    await drawRecent(); recentLabel();
+    oceanMover=()=>{clearTimeout(oceanTimer);oceanTimer=setTimeout(drawRecent,400);};map.on('moveend',oceanMover);
   }
 }
 document.getElementById('btnSST').onclick=()=>toggleOcean('sst');
 document.getElementById('btnTC').onclick=()=>toggleOcean('tc');
-document.getElementById('tcPrev').onclick=()=>{if(oceanKind!=='tc')return;if(tcYear>S2_MIN_YEAR){tcYear--;setTC();}else toast('Oldest composite');};
-document.getElementById('tcNext').onclick=()=>{if(oceanKind!=='tc')return;if(tcYear<S2_MAX_YEAR){tcYear++;setTC();}else toast('Newest composite');};
+document.getElementById('btnRecent').onclick=()=>toggleOcean('recent');
+document.getElementById('tcPrev').onclick=()=>{ // ◀ older
+  if(oceanKind==='tc'){if(tcYear>S2_MIN_YEAR){tcYear--;setTC();}else toast('Oldest composite');}
+  else if(oceanKind==='recent'){if(recentIdx<recentDates.length-1){recentIdx++;recentDate=recentDates[recentIdx].date;recentLabel();drawRecent();}else toast('Oldest pass');}
+};
+document.getElementById('tcNext').onclick=()=>{ // ▶ newer
+  if(oceanKind==='tc'){if(tcYear<S2_MAX_YEAR){tcYear++;setTC();}else toast('Newest composite');}
+  else if(oceanKind==='recent'){if(recentIdx>0){recentIdx--;recentDate=recentDates[recentIdx].date;recentLabel();drawRecent();}else toast('Newest pass');}
+};
 let sstEnabled=localStorage.getItem('saltspots.ocean')==='on';
 let tcEnabled=localStorage.getItem('saltspots.daily')==='on';
 function applyOceanEnabled(){
-  const a=document.getElementById('btnSST'),b=document.getElementById('btnTC');
-  if(a)a.style.display=sstEnabled?'':'none'; if(b)b.style.display=tcEnabled?'':'none';
+  const a=document.getElementById('btnSST'),b=document.getElementById('btnTC'),c=document.getElementById('btnRecent');
+  if(a)a.style.display=sstEnabled?'':'none'; if(b)b.style.display=tcEnabled?'':'none'; if(c)c.style.display=tcEnabled?'':'none';
   if(!sstEnabled&&oceanKind==='sst')clearOcean();
-  if(!tcEnabled&&oceanKind==='tc')clearOcean();
+  if(!tcEnabled&&(oceanKind==='tc'||oceanKind==='recent'))clearOcean();
 }
 
 /* Depth chart — shaded ~3 m CUDEM bathymetry + selectable contour interval (NCEI DEM_all) */
