@@ -374,7 +374,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v32';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v33';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -1771,7 +1771,7 @@ document.getElementById('lureImg').onchange=async(e)=>{
   try{
     const b64=await downscaleToBase64(file,768,0.8);
     const r=await fetch(LURE_URL,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+SB_ANON,'apikey':SB_ANON},
-      body:JSON.stringify({model:'gemma3:12b',image:b64})}).then(r=>r.json());
+      body:JSON.stringify({model:'gemma4:31b',image:b64})}).then(r=>r.json()); // gemma4:31b beat gemma3 on style/color/flake
     if(r.error){out.textContent='Couldn’t read it ('+esc(String(r.error)).slice(0,40)+')';}
     else{
       const p=parseLure(r.text);
