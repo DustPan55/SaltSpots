@@ -205,7 +205,7 @@
         <button id="btnGrass">🌿 Grass</button>
         <button id="btnDepth">🌊 Depth</button>
         <button id="btnSST">🌡️ SST</button>
-        <button id="btnTC">🌎 Daily</button>
+        <button id="btnTC">🌊 Flats</button>
       </div>
       <div class="legend"><span><span class="d" style="background:var(--green)"></span>Hot</span><span><span class="d" style="background:var(--amber)"></span>Fair</span><span><span class="d" style="background:var(--grey)"></span>Slow</span></div>
       <div class="legend" id="oceanLegend" style="left:auto;right:10px;bottom:38px;display:none"></div>
@@ -355,8 +355,8 @@
     <button class="btn sm ghost" id="setOcean" style="width:auto">Off</button></div>
   </div>
   <div class="card">
-    <div class="row"><div style="flex:1;min-width:0"><div style="font-weight:700">🌎 Daily satellite imagery</div>
-    <div class="muted" style="font-size:12px">True-color — water clarity, sediment, clean vs. muddy. Date stepper skips cloudy days. ~250 m, daily.</div></div>
+    <div class="row"><div style="flex:1;min-width:0"><div style="font-weight:700">🌊 Sentinel-2 imagery (10 m)</div>
+    <div class="muted" style="font-size:12px">High-res cloud-free view — see flats, bars, guts &amp; channels. Static composite (clearest view, not today's water); step the year to compare.</div></div>
     <button class="btn sm ghost" id="setDaily" style="width:auto">Off</button></div>
   </div>
   <button class="btn ghost" id="setForce">🔄 Force update (clear cache &amp; reload)</button>
@@ -373,7 +373,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v29';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v30';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -1067,18 +1067,16 @@ function drawSST(){
   const nl=L.imageOverlay(oceanUrl(),b,{opacity:0.6,interactive:false}).addTo(map);
   oceanLayer=nl; const drop=()=>{if(old&&old!==nl)map.removeLayer(old);}; nl.on('load',drop); nl.on('error',drop);
 }
-const GIBS_LAYER='VIIRS_NOAA20_CorrectedReflectance_TrueColor';
-const dayMs=864e5;
-function tcMidnight(ms){return new Date(new Date(ms).toISOString().slice(0,10)+'T00:00:00Z');}
-let tcDate=null;
-function setTC(){ // (re)create the GIBS tile layer for tcDate
+// Sentinel-2 cloud-free 10 m composite (EOX, no key) — see flats, bars, guts, channels
+const S2_MIN_YEAR=2017, S2_MAX_YEAR=2024;
+let tcYear=2023;
+function setTC(){
   if(oceanKind!=='tc')return;
   if(oceanLayer){map.removeLayer(oceanLayer);oceanLayer=null;}
-  const ds=tcDate.toISOString().slice(0,10);
-  oceanLayer=L.tileLayer(`https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${GIBS_LAYER}/default/${ds}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg`,
-    {maxNativeZoom:9,maxZoom:20,opacity:1,attribution:'NASA GIBS'}).addTo(map);
-  document.getElementById('tcDateLbl').textContent=tcDate.toLocaleDateString([],{month:'short',day:'numeric',timeZone:'UTC'});
-  document.getElementById('oceanLegend').textContent='🌎 True color (water clarity)';
+  oceanLayer=L.tileLayer(`https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-${tcYear}_3857/default/GoogleMapsCompatible/{z}/{y}/{x}.jpg`,
+    {maxNativeZoom:16,maxZoom:20,opacity:1,attribution:'Sentinel-2 cloudless · EOX'}).addTo(map);
+  document.getElementById('tcDateLbl').textContent=tcYear;
+  document.getElementById('oceanLegend').textContent='🌊 Sentinel-2 10 m · flats & structure';
 }
 function clearOcean(){
   if(oceanLayer){map.removeLayer(oceanLayer);oceanLayer=null;}
@@ -1102,15 +1100,14 @@ async function toggleOcean(kind){
     drawSST();
   }else if(kind==='tc'){
     oceanKind='tc';document.getElementById('btnTC').classList.add('on');
-    if(!tcDate)tcDate=tcMidnight(Date.now()-dayMs); // default: yesterday UTC
     document.getElementById('tcDateCtl').style.display='flex'; leg.style.display='';
-    toast('Loading daily satellite imagery…'); setTC();
+    toast('Loading Sentinel-2 10 m imagery…'); setTC();
   }
 }
 document.getElementById('btnSST').onclick=()=>toggleOcean('sst');
 document.getElementById('btnTC').onclick=()=>toggleOcean('tc');
-document.getElementById('tcPrev').onclick=()=>{if(oceanKind!=='tc'||!tcDate)return;const nd=new Date(tcDate.getTime()-dayMs);if(nd>=tcMidnight(Date.now()-16*dayMs)){tcDate=nd;setTC();}else toast('16-day limit');};
-document.getElementById('tcNext').onclick=()=>{if(oceanKind!=='tc'||!tcDate)return;const nd=new Date(tcDate.getTime()+dayMs);if(nd<=tcMidnight(Date.now())){tcDate=nd;setTC();}else toast('That’s the latest available');};
+document.getElementById('tcPrev').onclick=()=>{if(oceanKind!=='tc')return;if(tcYear>S2_MIN_YEAR){tcYear--;setTC();}else toast('Oldest composite');};
+document.getElementById('tcNext').onclick=()=>{if(oceanKind!=='tc')return;if(tcYear<S2_MAX_YEAR){tcYear++;setTC();}else toast('Newest composite');};
 let sstEnabled=localStorage.getItem('saltspots.ocean')==='on';
 let tcEnabled=localStorage.getItem('saltspots.daily')==='on';
 function applyOceanEnabled(){
