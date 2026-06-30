@@ -373,7 +373,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v30';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v31';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -1068,8 +1068,8 @@ function drawSST(){
   oceanLayer=nl; const drop=()=>{if(old&&old!==nl)map.removeLayer(old);}; nl.on('load',drop); nl.on('error',drop);
 }
 // Sentinel-2 cloud-free 10 m composite (EOX, no key) — see flats, bars, guts, channels
-const S2_MIN_YEAR=2017, S2_MAX_YEAR=2024;
-let tcYear=2023;
+const S2_MIN_YEAR=2017, S2_MAX_YEAR=2025; // 2025 newest; current year's composite isn't published until complete
+let tcYear=S2_MAX_YEAR;
 function setTC(){
   if(oceanKind!=='tc')return;
   if(oceanLayer){map.removeLayer(oceanLayer);oceanLayer=null;}
