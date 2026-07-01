@@ -79,6 +79,9 @@
   .mapbtns{position:absolute;right:10px;top:10px;z-index:500;display:flex;flex-direction:column;gap:7px}
   .mapbtns button{background:#fff;border:1px solid var(--line);border-radius:11px;padding:8px 11px;font-size:12.5px;font-weight:700;color:var(--ink);box-shadow:var(--shadow);display:flex;align-items:center;gap:6px}
   .mapbtns button.on{background:var(--teal);color:#fff;border-color:var(--teal)}
+  .basemenu{display:flex;flex-direction:column;gap:6px;background:rgba(255,255,255,.96);border:1px solid var(--line);border-radius:11px;padding:7px;box-shadow:var(--shadow);margin-top:-2px}
+  .basemenu button{background:#f4f8f9;border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-size:12px;font-weight:700;color:var(--ink);text-align:left;white-space:nowrap}
+  .basemenu button.on{background:var(--teal);color:#fff;border-color:var(--teal)}
   .legend{position:absolute;left:10px;bottom:10px;z-index:500;background:rgba(255,255,255,.94);border:1px solid var(--line);border-radius:11px;padding:7px 10px;font-size:11px;font-weight:600;box-shadow:var(--shadow);display:flex;gap:10px;align-items:center}
   .legend .d{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:3px;vertical-align:middle}
   .segctl{position:absolute;z-index:500;display:flex;gap:3px;background:rgba(255,255,255,.94);border:1px solid var(--line);border-radius:11px;padding:4px;box-shadow:var(--shadow)}
@@ -200,6 +203,7 @@
       <div id="map"></div>
       <div class="mapbtns">
         <button id="btnSat">🛰️ Satellite</button>
+        <div id="baseMenu" class="basemenu" style="display:none"></div>
         <button id="btnFind">✨ Find spots</button>
         <button id="btnOyster">🦪 Oyster</button>
         <button id="btnGrass">🌿 Grass</button>
@@ -374,7 +378,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v33';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v34';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -769,20 +773,56 @@ function moonSolunar(lat,lng,t){
 }
 
 /* ============================ MAP ============================ */
-let baseOSM,baseSat,satLabels,satOn=false;
+/* Base-map catalog. Google/Bing/Apple sell tiles only through keyed, paid SDKs
+   whose terms forbid raw {z}/{x}/{y} use — so the licensed options are Esri &
+   USGS. Google's public map servers are included as an unofficial extra since
+   this is a private personal app; they can vanish without notice. */
+const BASEMAPS={
+  osm:{label:'🗺️ Streets',sat:false,make:()=>L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:20,maxNativeZoom:19})},
+  esri:{label:'🛰️ Satellite (Esri)',sat:true,labels:true,make:()=>L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:20,maxNativeZoom:19})},
+  google:{label:'🛰️ Satellite (Google)',sat:true,make:()=>L.tileLayer('https://mt{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',{subdomains:['0','1','2','3'],maxZoom:21,maxNativeZoom:20})},
+  ghybrid:{label:'🛰️ Hybrid (Google)',sat:true,make:()=>L.tileLayer('https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',{subdomains:['0','1','2','3'],maxZoom:21,maxNativeZoom:20})},
+  usgs:{label:'🛰️ Satellite (USGS)',sat:true,make:()=>L.tileLayer('https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}',{maxZoom:20,maxNativeZoom:16})}
+};
+let baseLayer,satLabels,baseKey='osm',satOn=false;
+function applyBasemap(key){
+  const def=BASEMAPS[key]||BASEMAPS.osm; key=BASEMAPS[key]?key:'osm';
+  if(baseLayer)map.removeLayer(baseLayer);
+  if(satLabels){map.removeLayer(satLabels);}
+  baseLayer=def.make().addTo(map); baseLayer.bringToBack();
+  if(def.labels){satLabels=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',{maxZoom:20,maxNativeZoom:19,opacity:.9}).addTo(map);}
+  baseKey=key; satOn=!!def.sat;
+  const btn=document.getElementById('btnSat'); if(btn)btn.classList.toggle('on',satOn);
+  localStorage.setItem('saltspots.base',key);
+  renderBaseMenu();
+}
 function initMap(){
-  map=L.map('map',{zoomControl:true,attributionControl:false,maxZoom:20}).setView([28.45,-96.40],11); // Port O'Connor, TX
-  baseOSM=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:20,maxNativeZoom:19}).addTo(map);
-  baseSat=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:20,maxNativeZoom:19});
-  satLabels=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',{maxZoom:20,maxNativeZoom:19,opacity:.9});
+  // own the double-tap so it fires reliably on touch (built-in handler is unreliable in PWAs)
+  map=L.map('map',{zoomControl:true,attributionControl:false,maxZoom:21,doubleClickZoom:false}).setView([28.45,-96.40],11); // Port O'Connor, TX
+  const savedBase=localStorage.getItem('saltspots.base');
+  applyBasemap(savedBase==='sat'?'esri':(savedBase||'osm'));
+  // double-tap / double-click → zoom in one level toward the tapped point
+  let lastTap=0,lastPx=null;
+  map.on('click',e=>{
+    const now=performance.now(), px=e.containerPoint;
+    if(lastPx&&now-lastTap<330&&px.distanceTo(lastPx)<45){
+      map.setZoomAround(e.latlng,Math.min(map.getZoom()+1,map.getMaxZoom())); lastTap=0; lastPx=null;
+    }else{lastTap=now;lastPx=px;}
+  });
   spots.forEach(addMarker);
 }
-function toggleSat(){
-  const btn=document.getElementById('btnSat');satOn=!satOn;
-  if(satOn){map.removeLayer(baseOSM);baseSat.addTo(map);satLabels.addTo(map);baseSat.bringToBack();btn.classList.add('on');btn.innerHTML='🗺️ Map';}
-  else{map.removeLayer(baseSat);map.removeLayer(satLabels);baseOSM.addTo(map);baseOSM.bringToBack();btn.classList.remove('on');btn.innerHTML='🛰️ Satellite';}
-  localStorage.setItem('saltspots.base',satOn?'sat':'osm');
+function renderBaseMenu(){
+  const menu=document.getElementById('baseMenu'); if(!menu)return;
+  menu.innerHTML=Object.entries(BASEMAPS).map(([k,d])=>
+    `<button data-base="${k}" class="${k===baseKey?'on':''}">${d.label}</button>`).join('');
+  menu.querySelectorAll('button').forEach(b=>b.onclick=()=>{applyBasemap(b.dataset.base);toggleBaseMenu(false);});
 }
+function toggleBaseMenu(force){
+  const menu=document.getElementById('baseMenu');
+  const show=force!==undefined?force:menu.style.display==='none'||!menu.style.display;
+  menu.style.display=show?'flex':'none';
+}
+function toggleSat(){ toggleBaseMenu(); }
 function pinIcon(score){
   const c=scoreColor(score);
   return L.divIcon({className:'',iconSize:[24,24],iconAnchor:[12,24],
@@ -1841,7 +1881,7 @@ async function loadHeader(lat,lng,label){
 
 /* ============================ BOOT ============================ */
 initMap();renderSpots();applyOceanEnabled(); // ocean layers off by default; hidden unless enabled in Settings
-if(localStorage.getItem('saltspots.base')==='sat')toggleSat(); // restore saved base map
+// base map is restored inside initMap() via applyBasemap()
 if(window.innerWidth>=980){const sb=document.querySelector('.nav button[data-tab="Spots"]');if(sb)sb.click();} // desktop: map always shown, open Spots panel
 // size the map to fill the space between header and bottom nav
 function sizeMap(){const el=document.getElementById('map');if(!el)return;
