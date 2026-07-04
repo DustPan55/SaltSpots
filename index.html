@@ -254,8 +254,14 @@
 
   <section id="tabPlan" class="pad hidden">
     <div class="st"><h2>Plan a Trip · 7-day outlook</h2></div>
-    <div class="row" style="margin-bottom:10px">
+    <div class="row" style="margin-bottom:8px">
       <select id="planSpot" class="in" style="flex:1"></select>
+    </div>
+    <div class="row" style="margin-bottom:10px;gap:7px;align-items:center">
+      <span style="font-size:12.5px;font-weight:700;color:var(--muted);white-space:nowrap">🚤 On water</span>
+      <input type="time" id="planLaunch" class="in" style="flex:1;padding:9px 8px;text-align:center">
+      <span style="color:var(--muted);font-weight:700">→</span>
+      <input type="time" id="planOff" class="in" style="flex:1;padding:9px 8px;text-align:center">
     </div>
     <div id="planBody"></div>
   </section>
@@ -388,7 +394,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v36';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v37';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -1330,10 +1336,23 @@ function dayLabel(d){const t=new Date();t.setHours(0,0,0,0);const diff=Math.roun
   if(diff===0)return 'Today';if(diff===1)return 'Tomorrow';
   return d.toLocaleDateString([],{weekday:'long'});}
 function planRating(s){return s>=72?'Great':s>=60?'Good':s>=50?'Fair':'Slow';}
-// scan a single calendar day: peak score/time + its best fishable window(s)
-function planDay(spot,ctx,dayStart,now){
+function timeToMin(v){if(!v||!/^\d{1,2}:\d{2}/.test(v))return null;const p=v.split(':');return (+p[0])*60+(+p[1]);}
+function minToLabel(m){let h=Math.floor(m/60),mm=m%60;const ap=h>=12?'p':'a';h=h%12||12;return `${h}:${String(mm).padStart(2,'0')}${ap}`;}
+// the hours you'll actually be on the water — everything in Plan is scored only within this window
+function getPlanHours(){
+  const lI=document.getElementById('planLaunch'),oI=document.getElementById('planOff');
+  let s=timeToMin(lI&&lI.value),e=timeToMin(oI&&oI.value);
+  if(s==null)s=timeToMin(localStorage.getItem('saltspots.plan.launch'));
+  if(e==null)e=timeToMin(localStorage.getItem('saltspots.plan.off'));
+  if(s==null)s=330; if(e==null)e=1230;           // defaults: 5:30a → 8:30p
+  if(e<=s){s=0;e=1439;}                            // invalid range → whole day
+  return {startMin:s,endMin:e};
+}
+// scan a single calendar day: peak score/time + its best fishable window(s), within the on-water hours
+function planDay(spot,ctx,dayStart,now,hours){
+  const H=hours||{startMin:0,endMin:1439};
   let peak=0,peakT=null;const samples=[];
-  for(let mn=0;mn<1440;mn+=15){
+  for(let mn=H.startMin;mn<=H.endMin;mn+=15){
     const t=new Date(dayStart.getTime()+mn*6e4);
     if(t.getTime()<now-18e5)continue; // skip already-past times (30-min grace)
     const sc=scoreAt(spot,ctx,t).score;samples.push({t,sc});
@@ -1380,6 +1399,12 @@ async function renderPlan(){
     spots.map(s=>`<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
   if(prev&&[...sel.options].some(o=>o.value===prev))sel.value=prev;
   sel.onchange=renderPlan;
+  // on-water hours: seed inputs from storage, persist + re-plan on change
+  const lI=document.getElementById('planLaunch'),oI=document.getElementById('planOff');
+  if(!lI.value)lI.value=localStorage.getItem('saltspots.plan.launch')||'05:30';
+  if(!oI.value)oI.value=localStorage.getItem('saltspots.plan.off')||'20:30';
+  lI.onchange=oI.onchange=()=>{localStorage.setItem('saltspots.plan.launch',lI.value);localStorage.setItem('saltspots.plan.off',oI.value);renderPlan();};
+  const hours=getPlanHours();
   body.innerHTML='<div class="ld">Building the week…</div>';
   try{
     let spot,loc,label;
@@ -1391,7 +1416,7 @@ async function renderPlan(){
     const ctx=await getContext(loc.lat,loc.lng);
     const now=Date.now(),base=new Date();base.setHours(0,0,0,0);
     const days=[];
-    for(let d=0;d<7;d++){const p=planDay(spot,ctx,new Date(base.getTime()+d*864e5),now);if(p)days.push(p);}
+    for(let d=0;d<7;d++){const p=planDay(spot,ctx,new Date(base.getTime()+d*864e5),now,hours);if(p)days.push(p);}
     if(!days.length){body.innerHTML='<div class="empty">No forecast available right now.</div>';return;}
     const best=days.reduce((a,b)=>b.peak>a.peak?b:a);const bw=best.windows[0];
     let html=`<div class="card" style="background:linear-gradient(135deg,var(--tint),#fff);text-align:center">
@@ -1400,9 +1425,10 @@ async function renderPlan(){
       <div style="font-size:36px;font-weight:800;color:${scoreColor(best.peak)};margin-top:1px">${best.peak}<span style="font-size:14px;color:var(--muted);font-weight:700"> /100</span></div>
       ${bw?`<div style="font-size:13.5px;margin-top:1px">Get on the water <b>${fmtDate(bw.start)}–${fmtDate(bw.end)}</b></div>`:''}</div>`;
     html+=days.map(p=>dayCardHTML(p,ctx,best.day.getTime())).join('');
+    const hrTxt=`only your on-water hours (${minToLabel(hours.startMin)}–${minToLabel(hours.endMin)})`;
     html+=spots.length
-      ?`<div class="src">Tap a day to see <b>which spots to hit and when</b>. Rating ${label} for the next 7 days from tides, wind, pressure, moon/solunar &amp; time of day. Forecasts drift — recheck the morning of.</div>`
-      :`<div class="src">Add spots on the map, then tap a day here to get a ranked spot-by-spot plan. Rating ${label} for the next 7 days.</div>`;
+      ?`<div class="src">Scores use ${hrTxt}. Tap a day to see <b>which spots to hit and when</b>. Rating ${label} from tides, wind, pressure, moon/solunar &amp; time of day. Forecasts drift — recheck the morning of.</div>`
+      :`<div class="src">Scores use ${hrTxt}. Add spots on the map, then tap a day here to get a ranked spot-by-spot plan.</div>`;
     body.innerHTML=html;
     body.querySelectorAll('.daycard').forEach(el=>el.onclick=()=>renderDayPlan(+el.dataset.day));
   }catch(e){body.innerHTML=`<div class="empty">Couldn't build the outlook. ${esc(e.message||'')}</div>`;}
@@ -1416,12 +1442,12 @@ async function renderDayPlan(dayTime){
     <div class="ld">Ranking your spots for ${dayLabel(day)}…</div>`;
   document.getElementById('planBack').onclick=renderPlan;
   try{
-    const now=Date.now(),rows=[];
+    const now=Date.now(),rows=[],hours=getPlanHours();
     for(const s of spots){
       try{
         await Promise.all([ensureHabitat(s),ensureStructure(s)]);
         const ctx=await getContext(s.lat,s.lng);
-        const p=planDay(s,ctx,day,now);
+        const p=planDay(s,ctx,day,now,hours);
         if(!p)continue;
         const reasons=reasonsFrom(s,ctx,scoreAt(s,ctx,p.peakT),p.peakT).slice(0,2);
         rows.push({s,p,ctx,reasons});
@@ -1461,7 +1487,7 @@ async function renderDayPlan(dayTime){
           </div>
         </div></div>`;
     }).join('');
-    html+=`<div class="src">Each spot scored with its own structure, habitat &amp; target species for ${dayLabel(day)}. Times are local. Recheck wind the morning of.</div>`;
+    html+=`<div class="src">Each spot scored with its own structure, habitat &amp; target species for ${dayLabel(day)}, within your on-water hours (${minToLabel(hours.startMin)}–${minToLabel(hours.endMin)}). Times are local. Recheck wind the morning of.</div>`;
     body.innerHTML=html;
     document.getElementById('planBack3').onclick=renderPlan;
   }catch(e){body.innerHTML=`<button class="btn ghost sm" id="planBack4" style="width:auto;margin-bottom:10px">← Back to week</button><div class="empty">Couldn't build the day plan. ${esc(e.message||'')}</div>`;const b=document.getElementById('planBack4');if(b)b.onclick=renderPlan;}
