@@ -388,7 +388,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v35';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v36';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -1363,13 +1363,14 @@ function dayCardHTML(p,ctx,bestT){
   if(rising!=null)chips.push(`${rising?'🌊 incoming':'🌊 outgoing'}`);
   chips.push(`${mn.emoji} ${Math.round(mn.illum*100)}%`);
   const wx=wmo(code);if(wx)chips.push(wx);
-  return `<div class="win" style="align-items:stretch;${isBest?'border:2px solid var(--teal);box-shadow:0 2px 12px rgba(13,125,143,.18)':''}">
+  const hint=spots.length?`<span style="float:right;font-size:11px;color:var(--teal);font-weight:700">spots ›</span>`:'';
+  return `<div class="win daycard" data-day="${p.day.getTime()}" style="align-items:stretch;cursor:pointer;${isBest?'border:2px solid var(--teal);box-shadow:0 2px 12px rgba(13,125,143,.18)':''}">
     <div class="w-sc" style="background:${scoreColor(p.peak)}">${p.peak}</div>
     <div style="flex:1;min-width:0">
       <div class="w-t">${dayLabel(p.day)} <span class="muted" style="font-weight:600">${md}</span>
         <span style="float:right;font-weight:800;color:${scoreColor(p.peak)}">${planRating(p.peak)}${isBest?' ⭐':''}</span></div>
       <div class="w-r" style="margin-top:2px">Best bite <b style="color:var(--ink)">${winTxt}</b></div>
-      <div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:5px">${chips.map(c=>`<span class="pchip">${esc(c)}</span>`).join('')}</div>
+      <div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:5px;align-items:center">${chips.map(c=>`<span class="pchip">${esc(c)}</span>`).join('')}${hint}</div>
     </div></div>`;
 }
 async function renderPlan(){
@@ -1399,9 +1400,71 @@ async function renderPlan(){
       <div style="font-size:36px;font-weight:800;color:${scoreColor(best.peak)};margin-top:1px">${best.peak}<span style="font-size:14px;color:var(--muted);font-weight:700"> /100</span></div>
       ${bw?`<div style="font-size:13.5px;margin-top:1px">Get on the water <b>${fmtDate(bw.start)}–${fmtDate(bw.end)}</b></div>`:''}</div>`;
     html+=days.map(p=>dayCardHTML(p,ctx,best.day.getTime())).join('');
-    html+=`<div class="src">Rating ${label} for the next 7 days from tides, wind, pressure, moon/solunar &amp; time of day. Forecasts drift — recheck the morning of.</div>`;
+    html+=spots.length
+      ?`<div class="src">Tap a day to see <b>which spots to hit and when</b>. Rating ${label} for the next 7 days from tides, wind, pressure, moon/solunar &amp; time of day. Forecasts drift — recheck the morning of.</div>`
+      :`<div class="src">Add spots on the map, then tap a day here to get a ranked spot-by-spot plan. Rating ${label} for the next 7 days.</div>`;
     body.innerHTML=html;
+    body.querySelectorAll('.daycard').forEach(el=>el.onclick=()=>renderDayPlan(+el.dataset.day));
   }catch(e){body.innerHTML=`<div class="empty">Couldn't build the outlook. ${esc(e.message||'')}</div>`;}
+}
+
+// Drill-down: for a chosen day, rank every saved spot by its best window that day → a when/where itinerary
+async function renderDayPlan(dayTime){
+  const body=document.getElementById('planBody'),day=new Date(dayTime);
+  if(!spots.length){renderPlan();return;}
+  body.innerHTML=`<button class="btn ghost sm" id="planBack" style="width:auto;margin-bottom:10px">← Back to week</button>
+    <div class="ld">Ranking your spots for ${dayLabel(day)}…</div>`;
+  document.getElementById('planBack').onclick=renderPlan;
+  try{
+    const now=Date.now(),rows=[];
+    for(const s of spots){
+      try{
+        await Promise.all([ensureHabitat(s),ensureStructure(s)]);
+        const ctx=await getContext(s.lat,s.lng);
+        const p=planDay(s,ctx,day,now);
+        if(!p)continue;
+        const reasons=reasonsFrom(s,ctx,scoreAt(s,ctx,p.peakT),p.peakT).slice(0,2);
+        rows.push({s,p,ctx,reasons});
+      }catch(e){}
+    }
+    if(!rows.length){body.innerHTML=`<button class="btn ghost sm" id="planBack2" style="width:auto;margin-bottom:10px">← Back to week</button><div class="empty">Couldn't rate your spots for that day.</div>`;document.getElementById('planBack2').onclick=renderPlan;return;}
+    const ranked=[...rows].sort((a,b)=>b.p.peak-a.p.peak);
+    const startOf=r=>(r.p.windows[0]?r.p.windows[0].start.getTime():r.p.peakT.getTime());
+    // "the run": fishable spots (peak≥55) ordered through the day, so you can move spot→spot
+    const run=[...rows].filter(r=>r.p.peak>=55).sort((a,b)=>startOf(a)-startOf(b));
+    const md=day.toLocaleDateString([],{weekday:'long',month:'short',day:'numeric'});
+    let html=`<button class="btn ghost sm" id="planBack3" style="width:auto;margin-bottom:10px">← Back to week</button>
+      <div class="st"><h2 style="font-size:17px">${dayLabel(day)}'s game plan <span class="muted" style="font-weight:600;font-size:13px">${md}</span></h2></div>`;
+    if(run.length>1){
+      html+=`<div class="card" style="background:linear-gradient(135deg,var(--tint),#fff)">
+        <div style="font-weight:800;font-size:13px;margin-bottom:8px">🗺️ Suggested run — work the tide spot to spot</div>
+        ${run.map((r,i)=>`<div style="display:flex;align-items:center;gap:9px;${i?'border-top:1px solid var(--line);':''}padding:7px 0">
+          <div style="font-weight:800;font-size:13px;color:var(--teal);width:62px;flex:0 0 auto">${fmtDate(r.p.windows[0]?r.p.windows[0].start:r.p.peakT)}</div>
+          <div style="flex:1;min-width:0;font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(r.s.name)}</div>
+          <div class="w-sc" style="width:30px;height:30px;border-radius:8px;font-size:13px;background:${scoreColor(r.p.peak)}">${r.p.peak}</div></div>`).join('')}
+        <div class="muted" style="font-size:11.5px;margin-top:6px">Spots sharing a window are alternatives — pick by wind &amp; how they’re biting.</div></div>`;
+    }
+    html+=`<div class="st" style="margin-top:4px"><h2 style="font-size:15px">All spots, best first</h2></div>`;
+    html+=ranked.map(r=>{
+      const w=r.p.windows[0],wind=r.ctx.windAt(r.p.peakT),dir=r.ctx.windDirAt(r.p.peakT);
+      const winTxt=r.p.windows.length?r.p.windows.map(x=>`${fmtDate(x.start)}–${fmtDate(x.end)}`).join(' · '):`~${fmtDate(r.p.peakT)}`;
+      return `<div class="win" style="align-items:stretch">
+        <div class="w-sc" style="background:${scoreColor(r.p.peak)}">${r.p.peak}</div>
+        <div style="flex:1;min-width:0">
+          <div class="w-t">${esc(r.s.name)} <span style="float:right;font-weight:800;color:${scoreColor(r.p.peak)}">${planRating(r.p.peak)}</span></div>
+          <div class="w-r" style="margin-top:2px">Hit it <b style="color:var(--ink)">${winTxt}</b></div>
+          ${r.reasons.length?`<div class="w-r" style="margin-top:1px">${esc(r.reasons.join(' · '))}</div>`:''}
+          <div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:5px">
+            ${wind!=null?`<span class="pchip">💨 ${Math.round(wind)}mph${dir!=null?' '+deg2c(dir):''}</span>`:''}
+            ${r.s.structure?`<span class="pchip">${esc(labelFor(r.s.structure))}</span>`:''}
+            ${(r.s.species&&r.s.species.length)?`<span class="pchip">🎯 ${esc(r.s.species.slice(0,2).join(', '))}</span>`:''}
+          </div>
+        </div></div>`;
+    }).join('');
+    html+=`<div class="src">Each spot scored with its own structure, habitat &amp; target species for ${dayLabel(day)}. Times are local. Recheck wind the morning of.</div>`;
+    body.innerHTML=html;
+    document.getElementById('planBack3').onclick=renderPlan;
+  }catch(e){body.innerHTML=`<button class="btn ghost sm" id="planBack4" style="width:auto;margin-bottom:10px">← Back to week</button><div class="empty">Couldn't build the day plan. ${esc(e.message||'')}</div>`;const b=document.getElementById('planBack4');if(b)b.onclick=renderPlan;}
 }
 
 /* ============================ TABS ============================ */
