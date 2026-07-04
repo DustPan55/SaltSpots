@@ -143,6 +143,7 @@
   .win .w-sc{width:42px;height:42px;border-radius:11px;display:grid;place-items:center;font-weight:800;color:#fff;flex:0 0 auto}
   .win .w-t{font-weight:700;font-size:14px}
   .win .w-r{font-size:12px;color:var(--muted);margin-top:1px}
+  .pchip{font-size:11px;font-weight:700;color:var(--ink);background:var(--tint);border:1px solid var(--line);border-radius:8px;padding:2px 7px;white-space:nowrap}
 
   .row{display:flex;align-items:center;gap:10px}
   .badge{font-size:11.5px;font-weight:700;padding:4px 9px;border-radius:8px;background:var(--tint2);color:var(--teal)}
@@ -251,6 +252,14 @@
     <div id="catchList"></div>
   </section>
 
+  <section id="tabPlan" class="pad hidden">
+    <div class="st"><h2>Plan a Trip · 7-day outlook</h2></div>
+    <div class="row" style="margin-bottom:10px">
+      <select id="planSpot" class="in" style="flex:1"></select>
+    </div>
+    <div id="planBody"></div>
+  </section>
+
   <section id="tabToday" class="pad hidden">
     <div class="st"><h2>Today on the Water</h2></div>
     <div id="todayBody"></div>
@@ -272,6 +281,7 @@
   <button data-tab="Map" class="on"><span class="i">🗺️</span>Map</button>
   <button data-tab="Spots"><span class="i">📍</span>Spots</button>
   <button data-tab="Catches"><span class="i">🐟</span>Catches</button>
+  <button data-tab="Plan"><span class="i">📅</span>Plan</button>
   <button data-tab="Today"><span class="i">🌙</span>Today</button>
 </nav>
 
@@ -378,7 +388,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v34';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v35';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -660,7 +670,7 @@ async function getContext(lat,lng){
   const key=lat.toFixed(3)+','+lng.toFixed(3);
   if(ctxCache[key]&&Date.now()-ctxCache[key]._t<12*6e4)return ctxCache[key];
   const d0=ymd(new Date()), d2=ymd(new Date(Date.now()+6*864e5));   // 7-day horizon for trip planning
-  const wxU=`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m,pressure_msl,cloud_cover&hourly=wind_speed_10m,pressure_msl,cloud_cover&daily=sunrise,sunset,temperature_2m_mean&past_days=2&forecast_days=7&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto`;
+  const wxU=`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m,pressure_msl,cloud_cover&hourly=wind_speed_10m,wind_direction_10m,pressure_msl,cloud_cover,weather_code&daily=sunrise,sunset,temperature_2m_mean,weather_code&past_days=2&forecast_days=7&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto`;
   const marU=`https://marine-api.open-meteo.com/v1/marine?latitude=${lat}&longitude=${lng}&current=wave_height,sea_surface_temperature&length_unit=imperial&timezone=auto`;
   const [tide,wx,mar,wtemp,stream]=await Promise.all([ fetchTide(lat,lng,d0,d2),
     fetch(wxU).then(r=>r.json()).catch(()=>null),
@@ -669,7 +679,7 @@ async function getContext(lat,lng){
 
   const cur=wx?.current||{}, hourly=wx?.hourly||{}, daily=wx?.daily||{};
   const hTimes=(hourly.time||[]).map(s=>new Date(s).getTime());
-  const hWind=hourly.wind_speed_10m||[], hPress=hourly.pressure_msl||[], hCloud=hourly.cloud_cover||[];
+  const hWind=hourly.wind_speed_10m||[], hPress=hourly.pressure_msl||[], hCloud=hourly.cloud_cover||[], hDir=hourly.wind_direction_10m||[], hCode=hourly.weather_code||[];
   const sunDays=(daily.time||[]).map((d,i)=>({date:d,sunrise:daily.sunrise?.[i]?new Date(daily.sunrise[i]):null,sunset:daily.sunset?.[i]?new Date(daily.sunset[i]):null}));
   const nearH=t=>{const ms=(t&&t.getTime)?t.getTime():t;let bi=0,bd=1e15;for(let i=0;i<hTimes.length;i++){const dd=Math.abs(hTimes[i]-ms);if(dd<bd){bd=dd;bi=i}}return bi;};
   const moonI=moonInfo(new Date());
@@ -692,6 +702,8 @@ async function getContext(lat,lng){
     moonIllum:moonI.illum, moon:moonI, obsPts,
     cloudNow: cur.cloud_cover!=null?cur.cloud_cover:null, windTideFt, streamCfs: stream, tempTrendF,
     windAt:t=>hWind.length?hWind[nearH(t)]:(cur.wind_speed_10m??null),
+    windDirAt:t=>hDir.length?hDir[nearH(t)]:(cur.wind_direction_10m??null),
+    codeAt:t=>hCode.length?hCode[nearH(t)]:(cur.weather_code??null),
     pressAt:t=>hPress.length?hPress[nearH(t)]:(cur.pressure_msl??null),
     cloudAt:t=>hCloud.length?hCloud[nearH(t)]:(cur.cloud_cover??null),
     pressTrendAt:t=>{const i=nearH(t);if(i<3||i>=hPress.length)return null;return hPress[i]-hPress[i-3];}, // mb / 3h
@@ -1313,6 +1325,85 @@ function outlookHTML(spot,ctx){
         <div class="w-r">peak bite around ${fmtDate(d.peakT)}</div></div></div>`;}).join('');
 }
 
+/* ============================ PLAN TAB (7-day trip outlook) ============================ */
+function dayLabel(d){const t=new Date();t.setHours(0,0,0,0);const diff=Math.round((d-t)/864e5);
+  if(diff===0)return 'Today';if(diff===1)return 'Tomorrow';
+  return d.toLocaleDateString([],{weekday:'long'});}
+function planRating(s){return s>=72?'Great':s>=60?'Good':s>=50?'Fair':'Slow';}
+// scan a single calendar day: peak score/time + its best fishable window(s)
+function planDay(spot,ctx,dayStart,now){
+  let peak=0,peakT=null;const samples=[];
+  for(let mn=0;mn<1440;mn+=15){
+    const t=new Date(dayStart.getTime()+mn*6e4);
+    if(t.getTime()<now-18e5)continue; // skip already-past times (30-min grace)
+    const sc=scoreAt(spot,ctx,t).score;samples.push({t,sc});
+    if(sc>peak){peak=sc;peakT=t;}
+  }
+  if(!samples.length||peakT==null)return null;
+  const thr=Math.max(48,Math.min(62,peak-6)); // show each day's own best stretch, even on slow days
+  const wins=[];let cur=null;
+  for(const s of samples){
+    if(s.sc>=thr){if(!cur)cur={start:s.t,end:s.t,peak:s.sc,peakT:s.t};else{cur.end=s.t;if(s.sc>cur.peak){cur.peak=s.sc;cur.peakT=s.t;}}}
+    else if(cur){wins.push(cur);cur=null;}
+  }
+  if(cur)wins.push(cur);
+  wins.sort((a,b)=>b.peak-a.peak);
+  const top=wins.slice(0,2).sort((a,b)=>a.start-b.start);
+  return {day:dayStart,peak,peakT,windows:top};
+}
+function dayCardHTML(p,ctx,bestT){
+  const isBest=p.day.getTime()===bestT;
+  const md=p.day.toLocaleDateString([],{month:'short',day:'numeric'});
+  const wind=ctx.windAt(p.peakT),dir=ctx.windDirAt(p.peakT);
+  const rising=ctx.tide.pts.length?slopeAt(ctx.tide,p.peakT)>0:null;
+  const mn=moonInfo(p.day),code=ctx.codeAt(p.peakT);
+  const winTxt=p.windows.length?p.windows.map(w=>`${fmtDate(w.start)}–${fmtDate(w.end)}`).join('  ·  '):'—';
+  const chips=[];
+  if(wind!=null)chips.push(`💨 ${Math.round(wind)}mph${dir!=null?' '+deg2c(dir):''}`);
+  if(rising!=null)chips.push(`${rising?'🌊 incoming':'🌊 outgoing'}`);
+  chips.push(`${mn.emoji} ${Math.round(mn.illum*100)}%`);
+  const wx=wmo(code);if(wx)chips.push(wx);
+  return `<div class="win" style="align-items:stretch;${isBest?'border:2px solid var(--teal);box-shadow:0 2px 12px rgba(13,125,143,.18)':''}">
+    <div class="w-sc" style="background:${scoreColor(p.peak)}">${p.peak}</div>
+    <div style="flex:1;min-width:0">
+      <div class="w-t">${dayLabel(p.day)} <span class="muted" style="font-weight:600">${md}</span>
+        <span style="float:right;font-weight:800;color:${scoreColor(p.peak)}">${planRating(p.peak)}${isBest?' ⭐':''}</span></div>
+      <div class="w-r" style="margin-top:2px">Best bite <b style="color:var(--ink)">${winTxt}</b></div>
+      <div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:5px">${chips.map(c=>`<span class="pchip">${esc(c)}</span>`).join('')}</div>
+    </div></div>`;
+}
+async function renderPlan(){
+  const body=document.getElementById('planBody'),sel=document.getElementById('planSpot');
+  const prev=sel.value;
+  sel.innerHTML='<option value="__area">📍 This area (map center)</option>'+
+    spots.map(s=>`<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
+  if(prev&&[...sel.options].some(o=>o.value===prev))sel.value=prev;
+  sel.onchange=renderPlan;
+  body.innerHTML='<div class="ld">Building the week…</div>';
+  try{
+    let spot,loc,label;
+    if(sel.value&&sel.value!=='__area'){spot=spots.find(s=>s.id===sel.value);
+      if(!spot){body.innerHTML='<div class="empty">Spot not found.</div>';return;}
+      loc={lat:spot.lat,lng:spot.lng};label='“'+esc(spot.name)+'”';
+      await Promise.all([ensureHabitat(spot),ensureStructure(spot)]);}
+    else{loc={lat:map.getCenter().lat,lng:map.getCenter().lng};spot={structure:'flat',species:[]};label='the water at your map center (generic flat)';}
+    const ctx=await getContext(loc.lat,loc.lng);
+    const now=Date.now(),base=new Date();base.setHours(0,0,0,0);
+    const days=[];
+    for(let d=0;d<7;d++){const p=planDay(spot,ctx,new Date(base.getTime()+d*864e5),now);if(p)days.push(p);}
+    if(!days.length){body.innerHTML='<div class="empty">No forecast available right now.</div>';return;}
+    const best=days.reduce((a,b)=>b.peak>a.peak?b:a);const bw=best.windows[0];
+    let html=`<div class="card" style="background:linear-gradient(135deg,var(--tint),#fff);text-align:center">
+      <div class="muted" style="font-size:11.5px;font-weight:800;letter-spacing:.05em">⭐ BEST DAY THIS WEEK</div>
+      <div style="font-weight:800;font-size:23px;margin-top:3px">${dayLabel(best.day)} <span class="muted" style="font-size:15px;font-weight:700">${best.day.toLocaleDateString([],{month:'short',day:'numeric'})}</span></div>
+      <div style="font-size:36px;font-weight:800;color:${scoreColor(best.peak)};margin-top:1px">${best.peak}<span style="font-size:14px;color:var(--muted);font-weight:700"> /100</span></div>
+      ${bw?`<div style="font-size:13.5px;margin-top:1px">Get on the water <b>${fmtDate(bw.start)}–${fmtDate(bw.end)}</b></div>`:''}</div>`;
+    html+=days.map(p=>dayCardHTML(p,ctx,best.day.getTime())).join('');
+    html+=`<div class="src">Rating ${label} for the next 7 days from tides, wind, pressure, moon/solunar &amp; time of day. Forecasts drift — recheck the morning of.</div>`;
+    body.innerHTML=html;
+  }catch(e){body.innerHTML=`<div class="empty">Couldn't build the outlook. ${esc(e.message||'')}</div>`;}
+}
+
 /* ============================ TABS ============================ */
 document.querySelectorAll('.nav button').forEach(b=>{
   b.onclick=()=>{
@@ -1321,11 +1412,13 @@ document.querySelectorAll('.nav button').forEach(b=>{
     document.getElementById('tabMap').classList.toggle('hidden',t!=='Map');
     document.getElementById('tabSpots').classList.toggle('hidden',t!=='Spots');
     document.getElementById('tabCatches').classList.toggle('hidden',t!=='Catches');
+    document.getElementById('tabPlan').classList.toggle('hidden',t!=='Plan');
     document.getElementById('tabToday').classList.toggle('hidden',t!=='Today');
     document.getElementById('fab').classList.toggle('hidden',t!=='Map');
     if(t==='Map'&&map)setTimeout(sizeMap,60);
     if(t==='Spots')renderSpots();
     if(t==='Catches')renderCatches();
+    if(t==='Plan')renderPlan();
     if(t==='Today')renderToday();
   };
 });
