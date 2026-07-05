@@ -406,7 +406,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v44';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v45';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -735,7 +735,7 @@ async function getContext(lat,lng){
   const key=lat.toFixed(3)+','+lng.toFixed(3);
   if(ctxCache[key]&&Date.now()-ctxCache[key]._t<12*6e4)return ctxCache[key];
   const d0=ymd(new Date()), d2=ymd(new Date(Date.now()+6*864e5));   // 7-day horizon for trip planning
-  const wxU=`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m,pressure_msl,cloud_cover&hourly=wind_speed_10m,wind_direction_10m,pressure_msl,cloud_cover,weather_code&daily=sunrise,sunset,temperature_2m_mean,weather_code&past_days=2&forecast_days=7&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto`;
+  const wxU=`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,weather_code,wind_speed_10m,wind_gusts_10m,wind_direction_10m,pressure_msl,cloud_cover&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m,temperature_2m,pressure_msl,cloud_cover,weather_code&daily=sunrise,sunset,temperature_2m_mean,weather_code&past_days=2&forecast_days=7&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto`;
   const marU=`https://marine-api.open-meteo.com/v1/marine?latitude=${lat}&longitude=${lng}&current=wave_height,sea_surface_temperature&length_unit=imperial&timezone=auto`;
   const [tide,wx,mar,wtemp,stream]=await Promise.all([ fetchTide(lat,lng,d0,d2),
     fetch(wxU).then(r=>r.json()).catch(()=>null),
@@ -744,7 +744,7 @@ async function getContext(lat,lng){
 
   const cur=wx?.current||{}, hourly=wx?.hourly||{}, daily=wx?.daily||{};
   const hTimes=(hourly.time||[]).map(s=>new Date(s).getTime());
-  const hWind=hourly.wind_speed_10m||[], hPress=hourly.pressure_msl||[], hCloud=hourly.cloud_cover||[], hDir=hourly.wind_direction_10m||[], hCode=hourly.weather_code||[];
+  const hWind=hourly.wind_speed_10m||[], hPress=hourly.pressure_msl||[], hCloud=hourly.cloud_cover||[], hDir=hourly.wind_direction_10m||[], hCode=hourly.weather_code||[], hGust=hourly.wind_gusts_10m||[], hTemp=hourly.temperature_2m||[];
   const sunDays=(daily.time||[]).map((d,i)=>({date:d,sunrise:daily.sunrise?.[i]?new Date(daily.sunrise[i]):null,sunset:daily.sunset?.[i]?new Date(daily.sunset[i]):null}));
   const nearH=t=>{const ms=(t&&t.getTime)?t.getTime():t;let bi=0,bd=1e15;for(let i=0;i<hTimes.length;i++){const dd=Math.abs(hTimes[i]-ms);if(dd<bd){bd=dd;bi=i}}return bi;};
   const moonI=moonInfo(new Date());
@@ -766,8 +766,11 @@ async function getContext(lat,lng){
     cur, mar:mar?.current||{}, summer:[5,6,7,8,9].includes(new Date().getMonth()), month:new Date().getMonth(),
     moonIllum:moonI.illum, moon:moonI, obsPts,
     cloudNow: cur.cloud_cover!=null?cur.cloud_cover:null, windTideFt, streamCfs: stream, tempTrendF,
+    hours:{t:hTimes,wind:hWind,gust:hGust,dir:hDir,temp:hTemp,code:hCode}, sunList:sunDays,
     windAt:t=>hWind.length?hWind[nearH(t)]:(cur.wind_speed_10m??null),
     windDirAt:t=>hDir.length?hDir[nearH(t)]:(cur.wind_direction_10m??null),
+    gustAt:t=>hGust.length?hGust[nearH(t)]:(cur.wind_gusts_10m??null),
+    tempAt:t=>hTemp.length?hTemp[nearH(t)]:(cur.temperature_2m??null),
     codeAt:t=>hCode.length?hCode[nearH(t)]:(cur.weather_code??null),
     pressAt:t=>hPress.length?hPress[nearH(t)]:(cur.pressure_msl??null),
     cloudAt:t=>hCloud.length?hCloud[nearH(t)]:(cur.cloud_cover??null),
@@ -1871,6 +1874,91 @@ function tideChartCard(ctx){
 }
 function fmtTshort(t){const d=new Date(t.replace(' ','T'));let h=d.getHours();const ap=h>=12?'p':'a';h=h%12||12;return h+ap;}
 function trendTxt(tr){if(tr==null)return '';if(tr<-.4)return 'falling ↓';if(tr>.4)return 'rising ↑';return 'steady';}
+function fmtHour(ms){const d=new Date(ms);let h=d.getHours();const ap=h>=12?'p':'a';h=h%12||12;return h+ap;}
+// vertical midnight dividers + centered weekday labels for a time-series chart
+function dayGrid(t0,t1,X,H,padT,padB){
+  let g='';const d=new Date(t0);d.setHours(24,0,0,0);
+  for(let ms=d.getTime();ms<t1;ms+=864e5){const x=X(ms).toFixed(1);
+    g+=`<line x1="${x}" y1="${padT}" x2="${x}" y2="${H-padB}" stroke="#0e2a32" stroke-width="1" opacity=".08"/>`;}
+  const noon=new Date(t0);noon.setHours(12,0,0,0);
+  for(let ms=noon.getTime();ms<t1;ms+=864e5){ if(ms<t0+2*36e5)continue; const x=X(ms);
+    if(x>=X(t0)&&x<=X(t1)) g+=`<text x="${x.toFixed(1)}" y="${(H-6).toFixed(1)}" font-size="9" fill="#5f7a82" text-anchor="middle">${new Date(ms).toLocaleDateString([],{weekday:'short'})}</text>`;}
+  return g;
+}
+// ---- Wind forecast: hourly speed + gusts, ideal band, direction ticks ----
+function windChartCard(ctx){
+  const S=ctx.hours; if(!S||!S.t.length)return '';
+  const now=Date.now(), t0=now-1*36e5, t1=now+59*36e5; // 2.5-day horizon
+  const idx=[]; for(let i=0;i<S.t.length;i++) if(S.t[i]>=t0&&S.t[i]<=t1&&S.wind[i]!=null) idx.push(i);
+  if(idx.length<3)return '';
+  const wind=idx.map(i=>({t:S.t[i],v:S.wind[i]})), gust=idx.map(i=>({t:S.t[i],v:(S.gust[i]??S.wind[i])}));
+  const maxV=Math.max(16,...gust.map(g=>g.v))*1.06;
+  const W=320,H=156,padL=20,padR=6,padT=22,padB=26;
+  const X=ms=>padL+((ms-t0)/(t1-t0))*(W-padL-padR), Y=v=>padT+(1-v/maxV)*(H-padT-padB);
+  const poly=arr=>arr.map((p,i)=>(i?'L':'M')+X(p.t).toFixed(1)+' '+Y(p.v).toFixed(1)).join(' ');
+  const gArea=poly(gust)+` L ${X(gust[gust.length-1].t).toFixed(1)} ${H-padB} L ${X(gust[0].t).toFixed(1)} ${H-padB} Z`;
+  const bandT=Y(14).toFixed(1),bandB=Y(6).toFixed(1);
+  // y grid at 10 & 20 mph
+  let yg='';[10,20,30].forEach(v=>{if(v<maxV){const y=Y(v).toFixed(1);yg+=`<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" stroke="#0e2a32" stroke-width="1" opacity=".06"/><text x="2" y="${(+y+3).toFixed(1)}" font-size="8" fill="#8aa1a8">${v}</text>`;}});
+  // direction ticks every ~8h
+  let dir='';for(let i=0;i<idx.length;i+=8){const j=idx[i],x=X(S.t[j]);if(S.dir[j]!=null)dir+=`<text x="${x.toFixed(1)}" y="12" font-size="8.5" fill="#5f7a82" text-anchor="middle" font-weight="700">${deg2c(S.dir[j])}</text>`;}
+  const nowX=X(now).toFixed(1);
+  // summary: calmest & windiest daytime (6a-8p) hours ahead
+  const day=idx.filter(i=>{const h=new Date(S.t[i]).getHours();return h>=6&&h<=20&&S.t[i]>=now;});
+  let calm=null,rough=null;
+  day.forEach(i=>{const v=S.wind[i];if(calm==null||v<S.wind[calm])calm=i;if(rough==null||(S.gust[i]??v)>(S.gust[rough]??S.wind[rough]))rough=i;});
+  const cW=ctx.cur.wind_speed_10m,cD=ctx.cur.wind_direction_10m,cG=ctx.cur.wind_gusts_10m;
+  const sum=`Now <b>${cW!=null?Math.round(cW):'—'} mph ${cD!=null?deg2c(cD):''}</b>${cG?` · gusts ${Math.round(cG)}`:''}. `+
+    (calm!=null?`Calmest <b>${new Date(S.t[calm]).toLocaleDateString([],{weekday:'short'})} ${fmtHour(S.t[calm])}</b> (~${Math.round(S.wind[calm])}). `:'')+
+    (rough!=null?`Windiest <b>${new Date(S.t[rough]).toLocaleDateString([],{weekday:'short'})} ${fmtHour(S.t[rough])}</b> (${Math.round(S.wind[rough])}${S.gust[rough]?`g${Math.round(S.gust[rough])}`:''}).`:'');
+  return `<div class="card">
+    <div class="row" style="margin-bottom:2px"><div style="font-weight:800">Wind · next 2½ days</div>
+      <span style="margin-left:auto;font-size:11px;color:var(--muted)"><span style="color:#0d7d8f">━</span> wind &nbsp;<span style="color:#9cc4cc">▨</span> gusts &nbsp;<span style="color:#8fce9e">▬</span> ideal</span></div>
+    <svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block" height="${H}">
+      <rect x="${padL}" y="${bandT}" width="${(W-padL-padR).toFixed(1)}" height="${(bandB-bandT).toFixed(1)}" fill="#8fce9e" opacity=".16"/>
+      ${yg}${dayGrid(t0,t1,X,H,padT,padB)}
+      <path d="${gArea}" fill="#9cc4cc" opacity=".28"/>
+      <path d="${poly(wind)}" fill="none" stroke="#0d7d8f" stroke-width="2"/>
+      ${dir}
+      <line x1="${nowX}" y1="${padT}" x2="${nowX}" y2="${H-padB}" stroke="#0e2a32" stroke-width="1" stroke-dasharray="3 3" opacity=".35"/></svg>
+    <div style="font-size:12.5px;margin-top:6px">${sum}</div></div>`;
+}
+// ---- Air-temp forecast: hourly temp, night shading, water-temp reference ----
+function tempChartCard(ctx){
+  const S=ctx.hours; if(!S||!S.t.length||!S.temp.length)return '';
+  const now=Date.now(), t0=now-1*36e5, t1=now+71*36e5; // 3-day horizon
+  const idx=[]; for(let i=0;i<S.t.length;i++) if(S.t[i]>=t0&&S.t[i]<=t1&&S.temp[i]!=null) idx.push(i);
+  if(idx.length<3)return '';
+  const pts=idx.map(i=>({t:S.t[i],v:S.temp[i]}));
+  const water=ctx.water;
+  let mn=Math.min(...pts.map(p=>p.v),water!=null?water:1e9), mx=Math.max(...pts.map(p=>p.v),water!=null?water:-1e9);
+  const pad=(mx-mn)*0.15||3; mn-=pad;mx+=pad;
+  const W=320,H=150,padL=22,padR=6,padT=14,padB=26;
+  const X=ms=>padL+((ms-t0)/(t1-t0))*(W-padL-padR), Y=v=>padT+(1-(v-mn)/(mx-mn))*(H-padT-padB);
+  const poly=arr=>arr.map((p,i)=>(i?'L':'M')+X(p.t).toFixed(1)+' '+Y(p.v).toFixed(1)).join(' ');
+  // night shading from sun times
+  let night='';(ctx.sunList||[]).forEach(d=>{if(!d.sunset||!d.sunrise)return;
+    const nextRise=(ctx.sunList.find(x=>x.sunrise&&x.sunrise.getTime()>d.sunset.getTime())||{}).sunrise;
+    if(!nextRise)return;const a=Math.max(d.sunset.getTime(),t0),b=Math.min(nextRise.getTime(),t1);
+    if(b>a)night+=`<rect x="${X(a).toFixed(1)}" y="${padT}" width="${(X(b)-X(a)).toFixed(1)}" height="${(H-padT-padB).toFixed(1)}" fill="#0e2a32" opacity=".05"/>`;});
+  // y grid
+  let yg='';const span=mx-mn;const step=span>40?20:10;for(let v=Math.ceil(mn/step)*step;v<mx;v+=step){const y=Y(v).toFixed(1);yg+=`<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" stroke="#0e2a32" stroke-width="1" opacity=".06"/><text x="2" y="${(+y+3).toFixed(1)}" font-size="8" fill="#8aa1a8">${v}°</text>`;}
+  const waterLine=water!=null?`<line x1="${padL}" y1="${Y(water).toFixed(1)}" x2="${W-padR}" y2="${Y(water).toFixed(1)}" stroke="#2f9fd0" stroke-width="1.4" stroke-dasharray="4 3"/><text x="${W-padR-2}" y="${(Y(water)-3).toFixed(1)}" font-size="8.5" fill="#2f9fd0" text-anchor="end" font-weight="700">water ${water}°</text>`:'';
+  const nowX=X(now).toFixed(1);
+  // today's hi/lo (next 24h)
+  const t24=idx.filter(i=>S.t[i]>=now&&S.t[i]<=now+24*36e5).map(i=>S.temp[i]);
+  const hi=t24.length?Math.round(Math.max(...t24)):null, lo=t24.length?Math.round(Math.min(...t24)):null;
+  const sum=`Now <b>${ctx.cur.temperature_2m!=null?Math.round(ctx.cur.temperature_2m)+'°':'—'}</b>${hi!=null?` · next 24h <b>${lo}–${hi}°</b>`:''}${water!=null?` · water <b>${water}°</b>`:''}.`;
+  return `<div class="card">
+    <div class="row" style="margin-bottom:2px"><div style="font-weight:800">Air temp · next 3 days</div>
+      <span style="margin-left:auto;font-size:11px;color:var(--muted)"><span style="color:#e8863b">━</span> air${water!=null?' &nbsp;<span style="color:#2f9fd0">╌</span> water':''}</span></div>
+    <svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block" height="${H}">
+      ${night}${yg}${dayGrid(t0,t1,X,H,padT,padB)}
+      ${waterLine}
+      <path d="${poly(pts)}" fill="none" stroke="#e8863b" stroke-width="2"/>
+      <line x1="${nowX}" y1="${padT}" x2="${nowX}" y2="${H-padB}" stroke="#0e2a32" stroke-width="1" stroke-dasharray="3 3" opacity=".35"/></svg>
+    <div style="font-size:12.5px;margin-top:6px">${sum}</div></div>`;
+}
 
 /* ============================ TODAY TAB ============================ */
 async function renderToday(){
@@ -1890,6 +1978,8 @@ async function renderToday(){
         <div style="margin-top:10px;font-weight:800;font-size:34px;color:${scoreColor(nowScore)}">${nowScore}<span style="font-size:15px;color:var(--muted);font-weight:700"> /100 now</span></div>
       </div>
       ${tideChartCard(ctx)}
+      ${windChartCard(ctx)}
+      ${tempChartCard(ctx)}
       <div class="st"><h2 style="font-size:16px">Best windows today/tomorrow</h2></div>
       ${wins.length?wins.map(w=>`<div class="win"><div class="w-sc" style="background:${scoreColor(w.peak)}">${w.peak}</div>
         <div><div class="w-t">${winSpan(w.start,w.end)}</div><div class="w-r">${esc(w.reason||'')}</div></div></div>`).join(''):'<div class="muted" style="font-size:13px">Quiet stretch — no standout windows.</div>'}
