@@ -406,7 +406,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v43';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v44';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -1461,7 +1461,7 @@ function dayCardHTML(p,ctx,bestT){
       <div class="w-t">${dayLabel(p.day)} <span class="muted" style="font-weight:600">${md}</span>
         <span style="float:right;font-weight:800;color:${scoreColor(p.peak)}">${planRating(p.peak)}${isBest?' '+ic('star',13):''}</span></div>
       <div class="w-r" style="margin-top:2px">Best bite <b style="color:var(--ink)">${winTxt}</b></div>
-      <div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:5px;align-items:center">${chips.map(c=>`<span class="pchip">${esc(c)}</span>`).join('')}${hint}</div>
+      <div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:5px;align-items:center">${chips.map(c=>`<span class="pchip">${c}</span>`).join('')}${hint}</div>
     </div></div>`;
 }
 async function renderPlan(){
