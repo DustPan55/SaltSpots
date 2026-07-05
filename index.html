@@ -81,7 +81,9 @@
   .mapbtns button.on{background:var(--teal);color:#fff;border-color:var(--teal)}
   .mapbtns-list{display:none;flex-direction:column;gap:7px;align-items:flex-end}
   .mapbtns-list.open{display:flex}
+  .layers-toggle{position:relative}
   .layers-toggle.on{background:var(--teal);color:#fff;border-color:var(--teal)}
+  .layers-toggle.has-active::after{content:"";position:absolute;top:-3px;right:-3px;width:10px;height:10px;border-radius:50%;background:var(--green);border:2px solid #fff;box-shadow:0 1px 2px rgba(0,0,0,.3)}
   .basemenu{display:flex;flex-direction:column;gap:6px;background:rgba(255,255,255,.96);border:1px solid var(--line);border-radius:11px;padding:7px;box-shadow:var(--shadow);margin-top:-2px}
   .basemenu button{background:#f4f8f9;border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-size:12px;font-weight:700;color:var(--ink);text-align:left;white-space:nowrap}
   .basemenu button.on{background:var(--teal);color:#fff;border-color:var(--teal)}
@@ -400,7 +402,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v41';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v42';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -1110,10 +1112,18 @@ document.getElementById('btnDepth').onclick=toggleDepth;
 document.getElementById('btnSat').onclick=toggleSat;
 document.getElementById('btnLayers').onclick=()=>{
   const list=document.getElementById('mapbtnsList'),open=list.classList.toggle('open');
-  document.getElementById('btnLayers').classList.toggle('on',open);
-  document.getElementById('btnLayers').innerHTML=open?'🗺️ Layers ▴':'🗺️ Layers ▾';
+  const bl=document.getElementById('btnLayers');
+  bl.classList.toggle('on',open);
+  bl.innerHTML=(open?'🗺️ Layers ▴':'🗺️ Layers ▾');
   if(!open)toggleBaseMenu(false); // tuck the basemap popup away when collapsing
 };
+// dot on the collapsed Layers button whenever any overlay is active (excludes basemap/satellite)
+const OVERLAY_BTNS=['btnFind','btnOyster','btnGrass','btnDepth','btnSST','btnTC','btnRecent'];
+function updateLayersDot(){
+  const on=OVERLAY_BTNS.some(id=>{const b=document.getElementById(id);return b&&b.classList.contains('on');});
+  document.getElementById('btnLayers').classList.toggle('has-active',on);
+}
+new MutationObserver(updateLayersDot).observe(document.getElementById('mapbtnsList'),{attributes:true,subtree:true,attributeFilter:['class']});
 document.getElementById('btnAgent').onclick=runPatternAgent;
 
 /* Ocean overlay — NOAA ERDDAP SST (MUR 1km, current & gap-filled), 4326 WMS image, refresh on move.
