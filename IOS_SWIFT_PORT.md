@@ -253,4 +253,51 @@ Use **SF Symbols** for icons (the web app just moved to line icons — SF Symbol
 
 ---
 
+## 11. Monetization & data model (design before you build the schema)
+
+**Guiding principle:** every tier boundary is a *carrot* (gain features / remove ads / unlock insights), never a *stick* (never "pay or we expose you"). Spots are sacred to anglers — trust is the whole game.
+
+### Privacy rule (non-negotiable, all tiers)
+- **Raw spot locations are NEVER pooled or shared, at any tier, ever.** A user's spots + catch log stay private to their sync code by default.
+- The only thing that can ever leave a user's silo is **opt-in, anonymized, location-stripped condition→outcome patterns** (see community model).
+
+### Tiers
+**Free**
+- Fully private (same privacy as premium — privacy is a promise to *everyone*).
+- Ad-supported, but **tasteful/affiliate-leaning**, not blinking banners (see below).
+- Personal-tuned scoring, map, spots, catches, tide/wind/temp charts, best windows.
+- Opt-in to contribute to the community pool (rewarded with community insights).
+
+**Premium ($X/mo or annual)**
+- **No ads** (a strong, well-accepted upgrade hook — people happily pay to remove ads).
+- **AI features** — AI trip plan + pattern finder (these cost real Ollama compute → natural paywall).
+- **Apple Watch app + widgets/Live Activities** (the native-only payoff).
+- Unlimited catch history, advanced/extended forecasts, **offline map downloads**, higher-res recent satellite (Copernicus has per-request cost → natural gate), multi-device sync.
+- **Community insights view** (aggregated regional patterns).
+
+### Ads (free tier) — approach
+- **Primary = affiliate, using the lure-ID feature as the hook.** Lure photo → identify → "get it on Amazon / Tackle Warehouse" affiliate link. Contextual, useful, far better RPM than display. Extend to species/season tackle recommendations.
+- **Local partnerships:** tackle shops, charter guides, marine electronics, boat dealers — targeted local anglers are high-value. One clean sponsored card, native-styled.
+- **Minimal display ads** at most, mainly so "remove ads" is worth buying. Avoid interstitials — they clash with the polished, quick-glance UX.
+- **Realistic expectation:** display ad revenue is marginal at small scale. Expect **affiliate + subscription** to carry it; ads are a supplement.
+
+### Community model (optional collective learning — opt-in only)
+- Contributing users share **anonymized, location-stripped** records: `{conditions → outcome}` (e.g. tide phase, wind dir, water temp, pressure trend, moon → caught/blank + species). **No lat/lng, no spot name, no user identity.**
+- In return they get **aggregated regional insight** ("Matagorda: falling-tide SE-wind mornings producing this week").
+- Feeds an optional improved **baseline** weight model; a user's *own* calibration still overrides locally.
+
+### Supabase schema implications (design now, not later)
+- **Separate the private data from any poolable data at the table + RLS level from day one.**
+  - `salt_spots`, `salt_catches` — private, RLS strictly scoped to sync code (tighten beyond today's permissive anon policy for a real multi-user product: per-user auth, not just a shared code).
+  - New `community_patterns` (opt-in) — anonymized rows with **no location/identity columns at all** (strip at write time, not just hide at read). Populated only when the user has toggled contribution on.
+- **Auth:** for a real subscription product, move from the shared sync-code model to proper user accounts (Sign in with Apple), with sync-code sharing as a *feature* (share your log with a buddy) rather than the identity mechanism.
+- **Subscriptions:** StoreKit 2 for IAP; validate entitlement server-side (Supabase edge function verifying the App Store receipt/JWS) before unlocking premium-gated data/features.
+
+### App Store / legal notes
+- **Privacy nutrition label + privacy policy** required. Be explicit and honest: what's stored, that spots are never shared, what the opt-in community pool contains (anonymized patterns only).
+- **App Tracking Transparency (ATT)** prompt required if any ad SDK tracks across apps (IDFA). Prefer ad/affiliate approaches that avoid cross-app tracking to skip the friction.
+- Don't gate privacy behind payment — that framing invites reviewer scrutiny and 1-star reviews. Privacy is free and default; you sell capability and ad-removal.
+
+---
+
 *Generated from `index.html` @ APP_VERSION v46. If the web app advances, re-sync weights/endpoints from the latest source.*
