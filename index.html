@@ -394,7 +394,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v38';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v39';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -1423,7 +1423,8 @@ async function renderPlan(){
       <div class="muted" style="font-size:11.5px;font-weight:800;letter-spacing:.05em">⭐ BEST DAY THIS WEEK</div>
       <div style="font-weight:800;font-size:23px;margin-top:3px">${dayLabel(best.day)} <span class="muted" style="font-size:15px;font-weight:700">${best.day.toLocaleDateString([],{month:'short',day:'numeric'})}</span></div>
       <div style="font-size:36px;font-weight:800;color:${scoreColor(best.peak)};margin-top:1px">${best.peak}<span style="font-size:14px;color:var(--muted);font-weight:700"> /100</span></div>
-      ${bw?`<div style="font-size:13.5px;margin-top:1px">Get on the water <b>${fmtDate(bw.start)}–${fmtDate(bw.end)}</b></div>`:''}</div>`;
+      ${bw?`<div style="font-size:13.5px;margin-top:1px">Get on the water <b>${fmtDate(bw.start)}–${fmtDate(bw.end)}</b></div>`:''}
+      ${spots.length?`<button class="btn sm" id="btnBestAI" style="width:auto;margin-top:10px">🧠 Plan this day</button>`:''}</div>`;
     html+=days.map(p=>dayCardHTML(p,ctx,best.day.getTime())).join('');
     const hrTxt=`only your on-water hours (${minToLabel(hours.startMin)}–${minToLabel(hours.endMin)})`;
     html+=spots.length
@@ -1431,11 +1432,13 @@ async function renderPlan(){
       :`<div class="src">Scores use ${hrTxt}. Add spots on the map, then tap a day here to get a ranked spot-by-spot plan.</div>`;
     body.innerHTML=html;
     body.querySelectorAll('.daycard').forEach(el=>el.onclick=()=>renderDayPlan(+el.dataset.day));
+    const bestBtn=document.getElementById('btnBestAI');
+    if(bestBtn)bestBtn.onclick=()=>renderDayPlan(best.day.getTime(),true); // drill into best day + auto-run AI plan
   }catch(e){body.innerHTML=`<div class="empty">Couldn't build the outlook. ${esc(e.message||'')}</div>`;}
 }
 
 // Drill-down: for a chosen day, rank every saved spot by its best window that day → a when/where itinerary
-async function renderDayPlan(dayTime){
+async function renderDayPlan(dayTime,autoAI){
   const body=document.getElementById('planBody'),day=new Date(dayTime);
   if(!spots.length){renderPlan();return;}
   body.innerHTML=`<button class="btn ghost sm" id="planBack" style="width:auto;margin-bottom:10px">← Back to week</button>
@@ -1497,6 +1500,7 @@ async function renderDayPlan(dayTime){
     body.innerHTML=html;
     document.getElementById('planBack3').onclick=renderPlan;
     document.getElementById('btnDayAI').onclick=()=>runDayAI(day,hours,rows);
+    if(autoAI)runDayAI(day,hours,rows); // arrived via "Plan this day" → kick off the AI plan immediately
   }catch(e){body.innerHTML=`<button class="btn ghost sm" id="planBack4" style="width:auto;margin-bottom:10px">← Back to week</button><div class="empty">Couldn't build the day plan. ${esc(e.message||'')}</div>`;const b=document.getElementById('planBack4');if(b)b.onclick=renderPlan;}
 }
 
