@@ -60,6 +60,12 @@
   .gear{position:absolute;top:14px;right:16px;z-index:3;width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.24);color:#fff;font-size:16px;display:grid;place-items:center}
   .strip{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:14px;position:relative}
   .chip{background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.18);border-radius:13px;padding:9px 6px;text-align:center}
+  .tapchip{cursor:pointer;position:relative;transition:transform .08s,background .15s}
+  .tapchip:active{transform:scale(.95)}.tapchip:hover{background:rgba(255,255,255,.2)}
+  .tapchip::after{content:"";position:absolute;top:6px;right:7px;width:0;height:0;border-left:3px solid transparent;border-right:3px solid transparent;border-top:4px solid rgba(255,255,255,.55)}
+  .seg{display:flex;gap:6px;background:var(--tint);border-radius:12px;padding:4px}
+  .seg button{flex:1;border:none;background:transparent;border-radius:9px;padding:8px 4px;font-size:12.5px;font-weight:700;color:var(--muted);display:flex;align-items:center;justify-content:center;gap:5px}
+  .seg button.on{background:#fff;color:var(--teal);box-shadow:var(--shadow)}
   .chip .v{font-weight:800;font-size:16px;line-height:1.1}
   .chip .k{font-size:10.5px;opacity:.82;margin-top:3px;text-transform:uppercase;letter-spacing:.04em}
 
@@ -201,10 +207,10 @@
     <div class="brand"><span class="bi" data-ic="fish" data-sz="22" style="margin-right:7px"></span>Salt Spots</div>
     <div class="sub" id="locLabel">Finding your water…</div>
     <div class="strip" id="liveStrip">
-      <div class="chip"><div class="v" id="lsTide">—</div><div class="k">Tide</div></div>
-      <div class="chip"><div class="v" id="lsWater">—</div><div class="k">Water °F</div></div>
-      <div class="chip"><div class="v" id="lsWind">—</div><div class="k">Wind</div></div>
-      <div class="chip"><div class="v" id="lsBite">—</div><div class="k">Bite</div></div>
+      <div class="chip tapchip" data-fc="tide"><div class="v" id="lsTide">—</div><div class="k">Tide</div></div>
+      <div class="chip tapchip" data-fc="temp"><div class="v" id="lsWater">—</div><div class="k">Water °F</div></div>
+      <div class="chip tapchip" data-fc="wind"><div class="v" id="lsWind">—</div><div class="k">Wind</div></div>
+      <div class="chip tapchip" data-fc="bite"><div class="v" id="lsBite">—</div><div class="k">Bite</div></div>
     </div>
   </header>
 
@@ -327,6 +333,14 @@
 
 <div class="sheet-bg" id="detailBg"><div class="sheet"><div class="grab"></div><div class="pad" id="detailBody"></div></div></div>
 
+<div class="sheet-bg" id="fcBg"><div class="sheet"><div class="grab"></div><div class="pad">
+  <div class="row" style="margin-bottom:4px"><h2 id="fcTitle" style="margin:2px 2px">Forecast</h2>
+    <button class="btn sm ghost" id="fcClose" style="width:auto;margin-left:auto">Close</button></div>
+  <div class="seg" id="fcTabs" style="margin:6px 0 12px"></div>
+  <div id="fcBody"></div>
+  <div style="height:8px"></div>
+</div></div></div>
+
 <div class="sheet-bg" id="logBg"><div class="sheet"><div class="grab"></div><div class="pad">
   <h2 id="logTitle" style="margin:2px 2px 2px">Log a Catch</h2>
   <div class="muted" id="logWhere" style="font-size:12.5px;margin:0 2px"></div>
@@ -406,7 +420,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v45';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v46';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -1959,6 +1973,33 @@ function tempChartCard(ctx){
       <line x1="${nowX}" y1="${padT}" x2="${nowX}" y2="${H-padB}" stroke="#0e2a32" stroke-width="1" stroke-dasharray="3 3" opacity=".35"/></svg>
     <div style="font-size:12.5px;margin-top:6px">${sum}</div></div>`;
 }
+
+/* ---- Forecast sheet: tap a header chip → tide/wind/temp/bite projections ---- */
+const FC_META=[{k:'tide',label:'Tide',icon:'waves'},{k:'wind',label:'Wind',icon:'wind'},{k:'temp',label:'Temp',icon:'thermometer'},{k:'bite',label:'Bite',icon:'star'}];
+let fcCtx=null;
+function renderFcTabs(active){
+  const tabs=document.getElementById('fcTabs');
+  tabs.innerHTML=FC_META.map(m=>`<button data-k="${m.k}" class="${m.k===active?'on':''}">${ic(m.icon,15)}${m.label}</button>`).join('');
+  tabs.querySelectorAll('button').forEach(b=>b.onclick=()=>{renderFcTabs(b.dataset.k);drawForecast(b.dataset.k);});
+}
+function drawForecast(kind){
+  document.getElementById('fcTitle').textContent=({tide:'Tide',wind:'Wind',temp:'Temperature',bite:'Bite'}[kind]||'')+' forecast';
+  const body=document.getElementById('fcBody'),ctx=fcCtx; if(!ctx)return;
+  if(kind==='tide')body.innerHTML=tideChartCard(ctx)||'<div class="muted" style="font-size:13px">No tide data right now.</div>';
+  else if(kind==='wind')body.innerHTML=windChartCard(ctx)||'<div class="muted" style="font-size:13px">No wind data right now.</div>';
+  else if(kind==='temp')body.innerHTML=tempChartCard(ctx)||'<div class="muted" style="font-size:13px">No temperature data right now.</div>';
+  else{const probe={structure:'flat',species:[]},wins=bestWindows(probe,ctx);
+    body.innerHTML=(wins.length?'<div class="st" style="margin-top:0"><h2 style="font-size:15px">Best windows · next 48h</h2></div>'+wins.map(w=>`<div class="win"><div class="w-sc" style="background:${scoreColor(w.peak)}">${w.peak}</div><div><div class="w-t">${winSpan(w.start,w.end)}</div><div class="w-r">${esc(w.reason||'')}</div></div></div>`).join(''):'<div class="muted" style="font-size:13px">No standout windows in the next 48h.</div>')+outlookHTML(probe,ctx);}
+}
+async function openForecast(kind){
+  const bg=document.getElementById('fcBg');bg.classList.add('open');
+  renderFcTabs(kind);document.getElementById('fcBody').innerHTML='<div class="ld">Loading forecast…</div>';
+  try{const loc={lat:map.getCenter().lat,lng:map.getCenter().lng};fcCtx=await getContext(loc.lat,loc.lng);drawForecast(kind);}
+  catch(e){document.getElementById('fcBody').innerHTML=`<div class="empty">Couldn't load forecast. ${esc(e.message||'')}</div>`;}
+}
+document.querySelectorAll('.tapchip').forEach(c=>c.onclick=()=>openForecast(c.dataset.fc));
+document.getElementById('fcClose').onclick=()=>document.getElementById('fcBg').classList.remove('open');
+document.getElementById('fcBg').onclick=e=>{if(e.target.id==='fcBg')e.currentTarget.classList.remove('open');};
 
 /* ============================ TODAY TAB ============================ */
 async function renderToday(){
