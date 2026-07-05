@@ -76,9 +76,12 @@
   .reposbar button{padding:9px 13px;border-radius:10px;font-weight:700;font-size:13.5px;color:#fff}
   .reposbar #reposCancel{background:rgba(255,255,255,.18)}
   .reposbar #reposSave{background:var(--teal)}
-  .mapbtns{position:absolute;right:10px;top:10px;z-index:500;display:flex;flex-direction:column;gap:7px}
+  .mapbtns{position:absolute;right:10px;top:10px;z-index:500;display:flex;flex-direction:column;gap:7px;align-items:flex-end}
   .mapbtns button{background:#fff;border:1px solid var(--line);border-radius:11px;padding:8px 11px;font-size:12.5px;font-weight:700;color:var(--ink);box-shadow:var(--shadow);display:flex;align-items:center;gap:6px}
   .mapbtns button.on{background:var(--teal);color:#fff;border-color:var(--teal)}
+  .mapbtns-list{display:none;flex-direction:column;gap:7px;align-items:flex-end}
+  .mapbtns-list.open{display:flex}
+  .layers-toggle.on{background:var(--teal);color:#fff;border-color:var(--teal)}
   .basemenu{display:flex;flex-direction:column;gap:6px;background:rgba(255,255,255,.96);border:1px solid var(--line);border-radius:11px;padding:7px;box-shadow:var(--shadow);margin-top:-2px}
   .basemenu button{background:#f4f8f9;border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-size:12px;font-weight:700;color:var(--ink);text-align:left;white-space:nowrap}
   .basemenu button.on{background:var(--teal);color:#fff;border-color:var(--teal)}
@@ -188,7 +191,7 @@
 <div class="screen">
   <header>
     <div class="wave"></div>
-    <button class="gear" id="btnSettings" title="Settings">⚙️</button>
+    <button class="gear" id="btnSettings" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
     <div class="brand">🎣 Salt Spots</div>
     <div class="sub" id="locLabel">Finding your water…</div>
     <div class="strip" id="liveStrip">
@@ -203,15 +206,18 @@
     <div class="mapwrap">
       <div id="map"></div>
       <div class="mapbtns">
-        <button id="btnSat">🛰️ Satellite</button>
-        <div id="baseMenu" class="basemenu" style="display:none"></div>
-        <button id="btnFind">✨ Find spots</button>
-        <button id="btnOyster">🦪 Oyster</button>
-        <button id="btnGrass">🌿 Grass</button>
-        <button id="btnDepth">🌊 Depth</button>
-        <button id="btnSST">🌡️ SST</button>
-        <button id="btnTC">🌊 Flats</button>
-        <button id="btnRecent">📡 Recent</button>
+        <button id="btnLayers" class="layers-toggle">🗺️ Layers ▾</button>
+        <div class="mapbtns-list" id="mapbtnsList">
+          <button id="btnSat">🛰️ Satellite</button>
+          <div id="baseMenu" class="basemenu" style="display:none"></div>
+          <button id="btnFind">✨ Find spots</button>
+          <button id="btnOyster">🦪 Oyster</button>
+          <button id="btnGrass">🌿 Grass</button>
+          <button id="btnDepth">🌊 Depth</button>
+          <button id="btnSST">🌡️ SST</button>
+          <button id="btnTC">🌊 Flats</button>
+          <button id="btnRecent">📡 Recent</button>
+        </div>
       </div>
       <div class="legend"><span><span class="d" style="background:var(--green)"></span>Hot</span><span><span class="d" style="background:var(--amber)"></span>Fair</span><span><span class="d" style="background:var(--grey)"></span>Slow</span></div>
       <div class="legend" id="oceanLegend" style="left:auto;right:10px;bottom:38px;display:none"></div>
@@ -394,7 +400,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v40';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v41';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -1102,6 +1108,12 @@ document.getElementById('btnGrass').onclick=()=>toggleHabitat('grass');
 document.getElementById('btnFind').onclick=suggestSpots;
 document.getElementById('btnDepth').onclick=toggleDepth;
 document.getElementById('btnSat').onclick=toggleSat;
+document.getElementById('btnLayers').onclick=()=>{
+  const list=document.getElementById('mapbtnsList'),open=list.classList.toggle('open');
+  document.getElementById('btnLayers').classList.toggle('on',open);
+  document.getElementById('btnLayers').innerHTML=open?'🗺️ Layers ▴':'🗺️ Layers ▾';
+  if(!open)toggleBaseMenu(false); // tuck the basemap popup away when collapsing
+};
 document.getElementById('btnAgent').onclick=runPatternAgent;
 
 /* Ocean overlay — NOAA ERDDAP SST (MUR 1km, current & gap-filled), 4326 WMS image, refresh on move.
