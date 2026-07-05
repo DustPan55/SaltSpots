@@ -140,7 +140,7 @@
   .fbar .note{font-size:11.5px;color:var(--muted);margin-top:3px}
 
   .win{display:flex;align-items:center;gap:10px;padding:11px 12px;border:1px solid var(--line);border-radius:13px;background:#fff;margin-bottom:8px}
-  .win .w-sc{width:42px;height:42px;border-radius:11px;display:grid;place-items:center;font-weight:800;color:#fff;flex:0 0 auto}
+  .win .w-sc{width:42px;height:42px;border-radius:11px;display:grid;place-items:center;line-height:1;font-weight:800;color:#fff;flex:0 0 auto}
   .win .w-t{font-weight:700;font-size:14px}
   .win .w-r{font-size:12px;color:var(--muted);margin-top:1px}
   .pchip{font-size:11px;font-weight:700;color:var(--ink);background:var(--tint);border:1px solid var(--line);border-radius:8px;padding:2px 7px;white-space:nowrap}
@@ -160,7 +160,7 @@
   .fab{position:fixed;right:16px;bottom:78px;z-index:901;width:56px;height:56px;border-radius:18px;background:var(--teal);color:#fff;display:grid;place-items:center;font-size:27px;box-shadow:var(--shadow-lg)}
   .leaflet-container{font-family:inherit}
   .pin{width:24px;height:24px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid #fff;box-shadow:0 2px 5px rgba(0,0,0,.3);display:grid;place-items:center}
-  .pin span{transform:rotate(45deg);font-size:11px;font-weight:800;color:#fff}
+  .pin span{transform:rotate(45deg);font-size:11px;font-weight:800;color:#fff;line-height:1}
   .toast{position:fixed;left:50%;bottom:96px;transform:translateX(-50%) translateY(20px);background:var(--ink);color:#fff;padding:11px 18px;border-radius:12px;font-size:14px;font-weight:600;z-index:1100;opacity:0;transition:.25s;box-shadow:var(--shadow-lg);max-width:90%;text-align:center}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 
@@ -394,7 +394,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v39';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v40';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -1285,7 +1285,7 @@ async function suggestSpots(){
 }
 function clearSuggest(){suggestMarkers.forEach(m=>map.removeLayer(m));suggestMarkers=[];}
 function centroid(f){const g=f.geometry;if(!g)return null;let sx=0,sy=0,n=0;const polys=g.type==='Polygon'?[g.coordinates]:g.type==='MultiPolygon'?g.coordinates:[];for(const poly of polys)for(const c of poly[0]){sx+=c[0];sy+=c[1];n++;}return n?[sx/n,sy/n]:null;}
-function suggestIcon(score,struct){const c=scoreColor(score);return L.divIcon({className:'',iconSize:[30,30],iconAnchor:[15,15],html:`<div style="width:28px;height:28px;border-radius:50%;background:#fff;border:2.5px solid ${c};display:grid;place-items:center;box-shadow:0 1px 4px rgba(0,0,0,.35);font-size:12.5px;font-weight:800;color:${c}">${score}</div>`});}
+function suggestIcon(score,struct){const c=scoreColor(score);return L.divIcon({className:'',iconSize:[30,30],iconAnchor:[15,15],html:`<div style="width:28px;height:28px;border-radius:50%;background:#fff;border:2.5px solid ${c};display:grid;place-items:center;line-height:1;box-shadow:0 1px 4px rgba(0,0,0,.35);font-size:12.5px;font-weight:800;color:${c}">${score}</div>`});}
 function openSuggest(cd,ctx){
   const bg=document.getElementById('detailBg'),body=document.getElementById('detailBody');
   bg.classList.add('open');bg.onclick=e=>{if(e.target.id==='detailBg')bg.classList.remove('open')};
