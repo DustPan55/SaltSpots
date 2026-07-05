@@ -84,6 +84,10 @@
   .layers-toggle{position:relative}
   .layers-toggle.on{background:var(--teal);color:#fff;border-color:var(--teal)}
   .layers-toggle.has-active::after{content:"";position:absolute;top:-3px;right:-3px;width:10px;height:10px;border-radius:50%;background:var(--green);border:2px solid #fff;box-shadow:0 1px 2px rgba(0,0,0,.3)}
+  .ico{display:inline-block;vertical-align:-.16em;flex:0 0 auto}
+  .nav .i{display:flex;align-items:center;justify-content:center;height:23px}
+  .nav .i svg,.bi svg{display:block}
+  .bi{display:inline-flex;align-items:center}
   .basemenu{display:flex;flex-direction:column;gap:6px;background:rgba(255,255,255,.96);border:1px solid var(--line);border-radius:11px;padding:7px;box-shadow:var(--shadow);margin-top:-2px}
   .basemenu button{background:#f4f8f9;border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-size:12px;font-weight:700;color:var(--ink);text-align:left;white-space:nowrap}
   .basemenu button.on{background:var(--teal);color:#fff;border-color:var(--teal)}
@@ -194,7 +198,7 @@
   <header>
     <div class="wave"></div>
     <button class="gear" id="btnSettings" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
-    <div class="brand">🎣 Salt Spots</div>
+    <div class="brand"><span class="bi" data-ic="fish" data-sz="22" style="margin-right:7px"></span>Salt Spots</div>
     <div class="sub" id="locLabel">Finding your water…</div>
     <div class="strip" id="liveStrip">
       <div class="chip"><div class="v" id="lsTide">—</div><div class="k">Tide</div></div>
@@ -208,17 +212,17 @@
     <div class="mapwrap">
       <div id="map"></div>
       <div class="mapbtns">
-        <button id="btnLayers" class="layers-toggle">🗺️ Layers ▾</button>
+        <button id="btnLayers" class="layers-toggle"><span class="bi" data-ic="layers" data-sz="16"></span>Layers<span id="layCaret" style="margin-left:1px">▾</span></button>
         <div class="mapbtns-list" id="mapbtnsList">
-          <button id="btnSat">🛰️ Satellite</button>
+          <button id="btnSat"><span class="bi" data-ic="globe" data-sz="16"></span>Satellite</button>
           <div id="baseMenu" class="basemenu" style="display:none"></div>
-          <button id="btnFind">✨ Find spots</button>
-          <button id="btnOyster">🦪 Oyster</button>
-          <button id="btnGrass">🌿 Grass</button>
-          <button id="btnDepth">🌊 Depth</button>
-          <button id="btnSST">🌡️ SST</button>
-          <button id="btnTC">🌊 Flats</button>
-          <button id="btnRecent">📡 Recent</button>
+          <button id="btnFind"><span class="bi" data-ic="search" data-sz="16"></span>Find spots</button>
+          <button id="btnOyster"><span class="bi" data-ic="shell" data-sz="16"></span>Oyster</button>
+          <button id="btnGrass"><span class="bi" data-ic="sprout" data-sz="16"></span>Grass</button>
+          <button id="btnDepth"><span class="bi" data-ic="waves" data-sz="16"></span>Depth</button>
+          <button id="btnSST"><span class="bi" data-ic="thermometer" data-sz="16"></span>SST</button>
+          <button id="btnTC"><span class="bi" data-ic="image" data-sz="16"></span>Flats</button>
+          <button id="btnRecent"><span class="bi" data-ic="radio" data-sz="16"></span>Recent</button>
         </div>
       </div>
       <div class="legend"><span><span class="d" style="background:var(--green)"></span>Hot</span><span><span class="d" style="background:var(--amber)"></span>Fair</span><span><span class="d" style="background:var(--grey)"></span>Slow</span></div>
@@ -228,7 +232,7 @@
         <span id="tcDateLbl" style="padding:6px 4px;font-weight:700;font-size:12.5px;color:var(--ink)"></span>
         <button id="tcNext">▶</button>
       </div>
-      <div class="legend" id="depthLegend" style="left:auto;right:10px;bottom:10px;display:none"><span id="depthLegLbl">🌊 1-ft contours</span><span style="display:inline-block;width:42px;height:9px;border-radius:3px;background:linear-gradient(90deg,#d8efe2,#0a4f63);margin:0 5px"></span>deep</div>
+      <div class="legend" id="depthLegend" style="left:auto;right:10px;bottom:10px;display:none"><span id="depthLegLbl">1-ft contours</span><span style="display:inline-block;width:42px;height:9px;border-radius:3px;background:linear-gradient(90deg,#d8efe2,#0a4f63);margin:0 5px"></span>deep</div>
       <div class="segctl" id="depthCtl" style="left:10px;top:10px;display:none"><button data-ft="1" class="on">1 ft</button><button data-ft="2">2 ft</button><button data-ft="5">5 ft</button></div>
       <div class="crosshair" id="crosshair" aria-hidden="true"></div>
       <div class="reposbar" id="reposBar" style="display:none">
@@ -249,7 +253,7 @@
     <div class="st"><h2>Catch Log</h2><button class="btn sm" id="btnLogCatch" style="width:auto">＋ Log catch</button></div>
     <div class="card" id="catchAgentCard">
       <div class="row">
-        <div style="font-size:22px">🧠</div>
+        <div style="color:var(--teal);display:flex;align-items:center" data-ic="sparkle" data-sz="22"></div>
         <div style="flex:1;min-width:0"><div style="font-weight:800">What's working</div>
         <div class="muted" style="font-size:12px">Validated patterns from your real catches</div></div>
         <button class="btn sm" id="btnCatchAgent" style="width:auto">Analyze</button>
@@ -266,7 +270,7 @@
       <select id="planSpot" class="in" style="flex:1"></select>
     </div>
     <div class="row" style="margin-bottom:10px;gap:7px;align-items:center">
-      <span style="font-size:12.5px;font-weight:700;color:var(--muted);white-space:nowrap">🚤 On water</span>
+      <span style="font-size:12.5px;font-weight:700;color:var(--muted);white-space:nowrap"><span class="bi" data-ic="anchor" data-sz="14" style="margin-right:4px"></span>On water</span>
       <input type="time" id="planLaunch" class="in" style="flex:1;padding:9px 8px;text-align:center">
       <span style="color:var(--muted);font-weight:700">→</span>
       <input type="time" id="planOff" class="in" style="flex:1;padding:9px 8px;text-align:center">
@@ -279,7 +283,7 @@
     <div id="todayBody"></div>
     <div class="card" id="agentCard">
       <div class="row">
-        <div style="font-size:22px">🧠</div>
+        <div style="color:var(--teal);display:flex;align-items:center" data-ic="sparkle" data-sz="22"></div>
         <div style="flex:1;min-width:0"><div style="font-weight:800">AI pattern finder</div>
         <div class="muted" style="font-size:12px">Reads your spots + conditions and spots patterns</div></div>
         <button class="btn sm" id="btnAgent" style="width:auto">Find patterns</button>
@@ -292,11 +296,11 @@
 <button class="fab" id="fab" title="Add spot here">＋</button>
 
 <nav class="nav">
-  <button data-tab="Map" class="on"><span class="i">🗺️</span>Map</button>
-  <button data-tab="Spots"><span class="i">📍</span>Spots</button>
-  <button data-tab="Catches"><span class="i">🐟</span>Catches</button>
-  <button data-tab="Plan"><span class="i">📅</span>Plan</button>
-  <button data-tab="Today"><span class="i">🌙</span>Today</button>
+  <button data-tab="Map" class="on"><span class="i" data-ic="map" data-sz="22"></span>Map</button>
+  <button data-tab="Spots"><span class="i" data-ic="pin" data-sz="22"></span>Spots</button>
+  <button data-tab="Catches"><span class="i" data-ic="fish" data-sz="22"></span>Catches</button>
+  <button data-tab="Plan"><span class="i" data-ic="calendar" data-sz="22"></span>Plan</button>
+  <button data-tab="Today"><span class="i" data-ic="moon" data-sz="22"></span>Today</button>
 </nav>
 
 <div class="sheet-bg" id="editBg"><div class="sheet"><div class="grab"></div><div class="pad">
@@ -313,7 +317,7 @@
   <div style="height:16px"></div>
   <button class="btn" id="saveSpot">Save Spot</button>
   <div style="height:8px"></div>
-  <button class="btn ghost hidden" id="moveSpot">📍 Move location (use crosshair)</button>
+  <button class="btn ghost hidden" id="moveSpot"><span class="bi" data-ic="pin" data-sz="15" style="margin-right:6px"></span>Move location (use crosshair)</button>
   <div style="height:8px"></div>
   <button class="btn ghost hidden" id="delSpot">Delete Spot</button>
   <div style="height:6px"></div>
@@ -340,17 +344,17 @@
   <label class="fld">Bait / lure (optional)</label>
   <input class="in" id="logBait" placeholder="e.g. gold spoon, live shrimp, paddletail">
   <div class="row" style="margin-top:7px;gap:9px">
-    <button class="btn sm ghost" id="lureBtn" style="width:auto">📷 Identify from photo</button>
+    <button class="btn sm ghost" id="lureBtn" style="width:auto"><span class="bi" data-ic="camera" data-sz="15" style="margin-right:5px"></span>Identify from photo</button>
     <span id="lureOut" class="muted" style="font-size:12px;flex:1;min-width:0"></span>
   </div>
   <input type="file" id="lureImg" accept="image/*" capture="environment" style="display:none">
   <label class="fld">Notes (optional)</label>
   <textarea class="in" id="logNotes" placeholder="where on the spot, what they were doing…"></textarea>
-  <div class="muted" id="logCond" style="font-size:12px;margin:10px 2px">📍 Conditions (tide, wind tide, water temp, etc.) are pulled automatically for the date &amp; time you set — backdate it and it fetches that day's history.</div>
+  <div class="muted" id="logCond" style="font-size:12px;margin:10px 2px">Conditions (tide, wind tide, water temp, etc.) are pulled automatically for the date &amp; time you set — backdate it and it fetches that day's history.</div>
   <div style="height:6px"></div>
   <button class="btn" id="logSave">Save catch</button>
   <div style="height:8px"></div>
-  <button class="btn ghost" id="logBlank">🚫 No fish — log this slow session</button>
+  <button class="btn ghost" id="logBlank"><span class="bi" data-ic="ban" data-sz="15" style="margin-right:6px"></span>No fish — log this slow session</button>
   <button class="btn ghost" id="logDelete" style="display:none">Delete this entry</button>
   <div style="height:8px"></div>
   <button class="btn ghost" id="logCancel">Cancel</button>
@@ -378,17 +382,17 @@
     <div style="height:8px"></div><button class="btn sm ghost" id="setCalibReset" style="width:auto">Reset to defaults</button>
   </div>
   <div class="card">
-    <div class="row"><div style="flex:1;min-width:0"><div style="font-weight:700">🌡️ Sea-surface temp (SST)</div>
+    <div class="row"><div style="flex:1;min-width:0"><div style="font-weight:700"><span class="bi" data-ic="thermometer" data-sz="15" style="margin-right:5px"></span>Sea-surface temp (SST)</div>
     <div class="muted" style="font-size:12px">Offshore temp breaks — best in the Gulf, not the bays. ~daily.</div>
     <div class="muted" id="setOceanDate" style="font-size:12px;margin-top:3px"></div></div>
     <button class="btn sm ghost" id="setOcean" style="width:auto">Off</button></div>
   </div>
   <div class="card">
-    <div class="row"><div style="flex:1;min-width:0"><div style="font-weight:700">🌊 Sentinel-2 imagery (10 m)</div>
-    <div class="muted" style="font-size:12px">Two buttons: <b>🌊 Flats</b> = clean cloud-free composite (structure); <b>📡 Recent</b> = the latest real dated pass via Copernicus (current water, but cloudier). Step the date/year.</div></div>
+    <div class="row"><div style="flex:1;min-width:0"><div style="font-weight:700"><span class="bi" data-ic="image" data-sz="15" style="margin-right:5px"></span>Sentinel-2 imagery (10 m)</div>
+    <div class="muted" style="font-size:12px">Two buttons: <b>Flats</b> = clean cloud-free composite (structure); <b>Recent</b> = the latest real dated pass via Copernicus (current water, but cloudier). Step the date/year.</div></div>
     <button class="btn sm ghost" id="setDaily" style="width:auto">Off</button></div>
   </div>
-  <button class="btn ghost" id="setForce">🔄 Force update (clear cache &amp; reload)</button>
+  <button class="btn ghost" id="setForce"><span class="bi" data-ic="refresh" data-sz="15" style="margin-right:6px"></span>Force update (clear cache &amp; reload)</button>
   <div class="src" style="margin-top:12px">Salt Spots · data: NOAA CO-OPS tides &amp; water temp, Open-Meteo, NCEI CUDEM bathymetry, NOAA ENC, FL FWC &amp; TX TPWD habitat, NOAA ERDDAP SST/chlorophyll, imagery © Esri, Ollama AI. Scores are guidance — verify on the water.</div>
   <div style="height:10px"></div>
   <button class="btn ghost" id="setClose">Close</button>
@@ -402,7 +406,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v42';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v43';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -446,15 +450,62 @@ async function pushCatch(c){if(!sb)return;const {error}=await sb.from('salt_catc
 async function removeCatch(id){if(!sb)return;await sb.from('salt_catches').delete().eq('id',id);}
 
 const STRUCTURES=[
-  {k:'flat',label:'Grass flat',ic:'🌿'},{k:'oyster',label:'Oyster bar',ic:'🦪'},
-  {k:'creek',label:'Creek mouth',ic:'🪣'},{k:'mangrove',label:'Mangrove',ic:'🌳'},
-  {k:'dock',label:'Dock / light',ic:'🪝'},{k:'pothole',label:'Pothole',ic:'🕳️'},
-  {k:'channel',label:'Channel edge',ic:'📉'},{k:'point',label:'Point',ic:'📐'},
-  {k:'bridge',label:'Bridge',ic:'🌉'},{k:'jetty',label:'Jetty / pass',ic:'🧱'},
+  {k:'flat',label:'Grass flat',ic:'sprout'},{k:'oyster',label:'Oyster bar',ic:'shell'},
+  {k:'creek',label:'Creek mouth',ic:'route'},{k:'mangrove',label:'Mangrove',ic:'tree'},
+  {k:'dock',label:'Dock / light',ic:'anchor'},{k:'pothole',label:'Pothole',ic:'dot'},
+  {k:'channel',label:'Channel edge',ic:'waves'},{k:'point',label:'Point',ic:'triangle'},
+  {k:'bridge',label:'Bridge',ic:'bridge'},{k:'jetty',label:'Jetty / pass',ic:'wall'},
 ];
 const SPECIES=['Redfish','Trout','Black drum','Flounder','Sheepshead','Jack','Snook','Tarpon','Mangrove snapper','Cobia'];
-const icFor=k=>(STRUCTURES.find(s=>s.k===k)||{}).ic||'📍';
+const icFor=k=>ic((STRUCTURES.find(s=>s.k===k)||{}).ic||'pin',21);
 const labelFor=k=>(STRUCTURES.find(s=>s.k===k)||{}).label||'Spot';
+
+/* ---- Line-icon set (Lucide/Feather-style, monochrome, inherit currentColor) ---- */
+const ICONS={
+  map:'<path d="M9 4 3 6.5v14L9 18l6 2.5 6-2.5v-14L15 6.5 9 4Z"/><path d="M9 4v14"/><path d="M15 6.5v14"/>',
+  pin:'<path d="M12 21s7-5.6 7-11a7 7 0 1 0-14 0c0 5.4 7 11 7 11Z"/><circle cx="12" cy="10" r="2.6"/>',
+  fish:'<path d="M2.5 12s3.2-5 8.5-5 8.5 5 8.5 5-3.2 5-8.5 5-8.5-5-8.5-5Z"/><path d="M17.5 9.2 22 6.5v11l-4.5-2.7"/><circle cx="7.5" cy="10.5" r=".9" fill="currentColor" stroke="none"/>',
+  calendar:'<rect x="3" y="4.5" width="18" height="16.5" rx="2.2"/><path d="M3 9.5h18"/><path d="M8 2.5v4"/><path d="M16 2.5v4"/>',
+  moon:'<path d="M20.5 13.2A8.5 8.5 0 1 1 10.8 3.5 6.6 6.6 0 0 0 20.5 13.2Z"/>',
+  layers:'<path d="M12 3 2.5 7.5 12 12l9.5-4.5L12 3Z"/><path d="M2.5 12 12 16.5 21.5 12"/><path d="M2.5 16.5 12 21l9.5-4.5"/>',
+  globe:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c3 3.2 3 14.8 0 18M12 3c-3 3.2-3 14.8 0 18"/>',
+  search:'<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>',
+  shell:'<path d="M12 21C6.5 21 3 16 3 10.8A9 9 0 0 1 21 10.8C21 16 17.5 21 12 21Z"/><path d="M12 21V8"/><path d="M7.8 20 6.4 9.2"/><path d="M16.2 20l1.4-10.8"/>',
+  sprout:'<path d="M12 21v-9"/><path d="M12 12C12 8.4 9.2 6 5.2 6 5.2 9.6 8 12 12 12Z"/><path d="M12 13.5c0-3.4 2.8-5.5 6.8-5.5 0 3.4-2.8 5.5-6.8 5.5Z"/>',
+  waves:'<path d="M2 7.5c2-2 4-2 6 0s4 2 6 0 4-2 6 0"/><path d="M2 12.5c2-2 4-2 6 0s4 2 6 0 4-2 6 0"/><path d="M2 17.5c2-2 4-2 6 0s4 2 6 0 4-2 6 0"/>',
+  thermometer:'<path d="M14 14.5V5a2 2 0 0 0-4 0v9.5a4 4 0 1 0 4 0Z"/>',
+  image:'<rect x="3" y="3.5" width="18" height="17" rx="2.2"/><circle cx="8.5" cy="9" r="1.8"/><path d="M21 15.5 16 11 5.5 20.5"/>',
+  radio:'<circle cx="12" cy="12" r="2"/><path d="M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14M8 8a6 6 0 0 0 0 8M16 8a6 6 0 0 1 0 8"/>',
+  anchor:'<circle cx="12" cy="5" r="2.6"/><path d="M12 7.6V21"/><path d="M5 12H2.5a9.5 9.5 0 0 0 19 0H19"/>',
+  star:'<path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.7l5.9-.9L12 3.5Z"/>',
+  target:'<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.6"/><circle cx="12" cy="12" r=".9" fill="currentColor" stroke="none"/>',
+  wind:'<path d="M3 8h11a3 3 0 1 0-3-3"/><path d="M3 12.5h16a3 3 0 1 1-3 3"/><path d="M3 17h9a2.6 2.6 0 1 1-2.6 2.6"/>',
+  camera:'<path d="M4 7.5h3l1.8-2.2h6.4L17 7.5h3a1.2 1.2 0 0 1 1.2 1.2v10.4A1.2 1.2 0 0 1 20 20.3H4a1.2 1.2 0 0 1-1.2-1.2V8.7A1.2 1.2 0 0 1 4 7.5Z"/><circle cx="12" cy="13.2" r="3.4"/>',
+  ban:'<circle cx="12" cy="12" r="8.6"/><path d="M6 6l12 12"/>',
+  refresh:'<path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1"/><path d="M20.5 4v5h-5"/>',
+  link:'<path d="M9.5 14.5 14.5 9.5"/><path d="M10.8 6.6 12.2 5.2a4 4 0 0 1 5.6 5.6l-1.4 1.4"/><path d="M13.2 17.4l-1.4 1.4a4 4 0 0 1-5.6-5.6l1.4-1.4"/>',
+  route:'<path d="M4 11l16-7-7 16-2.4-6.6L4 11Z"/>',
+  sparkle:'<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3Z"/><path d="M18.5 15l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z"/>',
+  info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 7.6h.01"/>',
+  arrowUp:'<path d="M12 19V5"/><path d="M6 11l6-6 6 6"/>',
+  arrowDown:'<path d="M12 5v14"/><path d="M6 13l6 6 6-6"/>',
+  tree:'<path d="M12 21v-6"/><path d="M12 15c-3.3 0-6-2.4-6-5.5S8.7 3 12 3s6 3 6 6.5-2.7 5.5-6 5.5Z"/>',
+  dot:'<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="2.3" fill="currentColor" stroke="none"/>',
+  triangle:'<path d="M12 4.5 21 20H3L12 4.5Z"/>',
+  bridge:'<path d="M2.5 10h19"/><path d="M4 10v9M20 10v9"/><path d="M4 14a6 6 0 0 1 6-4h4a6 6 0 0 1 6 4"/>',
+  wall:'<rect x="3" y="5.5" width="18" height="13" rx="1.2"/><path d="M3 12h18"/><path d="M9 5.5v6.5M15 12v6.5M9 12v6.5"/>'
+};
+function ic(name,size){const p=ICONS[name];if(!p)return '';const s=size||16;
+  return `<svg class="ico" viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;}
+function hydrateIcons(root){(root||document).querySelectorAll('[data-ic]').forEach(el=>{el.innerHTML=ic(el.dataset.ic,+(el.dataset.sz||18));el.removeAttribute('data-ic');});}
+// SVG moon that actually shows the illuminated fraction (N-hemisphere: waxing lit on the right)
+function moonSVG(illum,waxing,size){
+  const s=size||22,r=9,cx=11,cy=11,rx=Math.abs(1-2*illum)*r;
+  const outer=waxing?1:0, inner=(illum>0.5)===waxing?outer:1-outer;
+  const d=`M${cx} ${cy-r} A ${r} ${r} 0 0 ${outer} ${cx} ${cy+r} A ${rx.toFixed(2)} ${r} 0 0 ${inner} ${cx} ${cy-r} Z`;
+  return `<svg class="ico" viewBox="0 0 22 22" width="${s}" height="${s}">`+
+    `<circle cx="${cx}" cy="${cy}" r="${r}" fill="#22526040" stroke="#0e2a3255" stroke-width="1"/>`+
+    `<path d="${d}" fill="#f2d585"/></svg>`;}
 
 function load(){try{return JSON.parse(localStorage.getItem(LS))||[]}catch(e){return[]}}
 function save(){localStorage.setItem(LS,JSON.stringify(spots))}
@@ -804,11 +855,11 @@ function moonSolunar(lat,lng,t){
    USGS. Google's public map servers are included as an unofficial extra since
    this is a private personal app; they can vanish without notice. */
 const BASEMAPS={
-  osm:{label:'🗺️ Streets',sat:false,make:()=>L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:20,maxNativeZoom:19})},
-  esri:{label:'🛰️ Satellite (Esri)',sat:true,labels:true,make:()=>L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:20,maxNativeZoom:19})},
-  google:{label:'🛰️ Satellite (Google)',sat:true,make:()=>L.tileLayer('https://mt{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',{subdomains:['0','1','2','3'],maxZoom:21,maxNativeZoom:20})},
-  ghybrid:{label:'🛰️ Hybrid (Google)',sat:true,make:()=>L.tileLayer('https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',{subdomains:['0','1','2','3'],maxZoom:21,maxNativeZoom:20})},
-  usgs:{label:'🛰️ Satellite (USGS)',sat:true,make:()=>L.tileLayer('https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}',{maxZoom:20,maxNativeZoom:16})}
+  osm:{label:'Streets',sat:false,make:()=>L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:20,maxNativeZoom:19})},
+  esri:{label:'Satellite (Esri)',sat:true,labels:true,make:()=>L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:20,maxNativeZoom:19})},
+  google:{label:'Satellite (Google)',sat:true,make:()=>L.tileLayer('https://mt{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',{subdomains:['0','1','2','3'],maxZoom:21,maxNativeZoom:20})},
+  ghybrid:{label:'Hybrid (Google)',sat:true,make:()=>L.tileLayer('https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',{subdomains:['0','1','2','3'],maxZoom:21,maxNativeZoom:20})},
+  usgs:{label:'Satellite (USGS)',sat:true,make:()=>L.tileLayer('https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}',{maxZoom:20,maxNativeZoom:16})}
 };
 let baseLayer,satLabels,baseKey='osm',satOn=false;
 function applyBasemap(key){
@@ -1112,9 +1163,8 @@ document.getElementById('btnDepth').onclick=toggleDepth;
 document.getElementById('btnSat').onclick=toggleSat;
 document.getElementById('btnLayers').onclick=()=>{
   const list=document.getElementById('mapbtnsList'),open=list.classList.toggle('open');
-  const bl=document.getElementById('btnLayers');
-  bl.classList.toggle('on',open);
-  bl.innerHTML=(open?'🗺️ Layers ▴':'🗺️ Layers ▾');
+  document.getElementById('btnLayers').classList.toggle('on',open);
+  document.getElementById('layCaret').textContent=open?'▴':'▾';
   if(!open)toggleBaseMenu(false); // tuck the basemap popup away when collapsing
 };
 // dot on the collapsed Layers button whenever any overlay is active (excludes basemap/satellite)
@@ -1157,7 +1207,7 @@ function setTC(){
   oceanLayer=L.tileLayer(`https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-${tcYear}_3857/default/GoogleMapsCompatible/{z}/{y}/{x}.jpg`,
     {maxNativeZoom:16,maxZoom:20,opacity:1,attribution:'Sentinel-2 cloudless · EOX'}).addTo(map);
   document.getElementById('tcDateLbl').textContent=tcYear;
-  document.getElementById('oceanLegend').textContent='🌊 Sentinel-2 10 m · flats & structure';
+  document.getElementById('oceanLegend').textContent='Sentinel-2 10 m · flats & structure';
 }
 // Recent dated Sentinel-2 via Copernicus (edge fn renders the actual clear pass)
 let recentDates=[],recentIdx=0,recentDate=null,recentObjUrl=null;
@@ -1178,8 +1228,8 @@ async function drawRecent(){
   nl.on('load',()=>{if(old&&old!==nl)map.removeLayer(old);if(oldUrl)URL.revokeObjectURL(oldUrl);});
 }
 function recentLabel(){const d=recentDates[recentIdx];
-  document.getElementById('tcDateLbl').textContent=d?(new Date(d.date+'T12:00:00Z').toLocaleDateString([],{month:'short',day:'numeric'})+' · '+d.cloud+'%☁'):'—';
-  document.getElementById('oceanLegend').textContent='📡 Sentinel-2 recent pass';
+  document.getElementById('tcDateLbl').textContent=d?(new Date(d.date+'T12:00:00Z').toLocaleDateString([],{month:'short',day:'numeric'})+' · '+d.cloud+'% cloud'):'—';
+  document.getElementById('oceanLegend').textContent='Sentinel-2 recent pass';
 }
 function clearOcean(){
   if(oceanLayer){map.removeLayer(oceanLayer);oceanLayer=null;}
@@ -1199,7 +1249,7 @@ async function toggleOcean(kind){
     oceanKind='sst';document.getElementById('btnSST').classList.add('on');
     oceanMover=()=>{clearTimeout(oceanTimer);oceanTimer=setTimeout(drawSST,300);};map.on('moveend',oceanMover);
     toast('Loading sea-surface temp…'); await fetchOceanLatest();
-    leg.textContent='🌡️ SST cool → warm'+(oceanDate?'  ·  '+oceanDate:'');leg.style.display='';
+    leg.textContent='SST cool → warm'+(oceanDate?'  ·  '+oceanDate:'');leg.style.display='';
     drawSST();
   }else if(kind==='tc'){
     oceanKind='tc';document.getElementById('btnTC').classList.add('on');
@@ -1208,7 +1258,7 @@ async function toggleOcean(kind){
   }else if(kind==='recent'){
     if(map.getZoom()<9){toast('Zoom into a bay first for Recent imagery');return;}
     oceanKind='recent';document.getElementById('btnRecent').classList.add('on');
-    document.getElementById('tcDateCtl').style.display='flex';leg.style.display='';leg.textContent='📡 finding recent passes…';
+    document.getElementById('tcDateCtl').style.display='flex';leg.style.display='';leg.textContent='finding recent passes…';
     document.getElementById('tcDateLbl').textContent='…';
     toast('Finding recent Sentinel-2 passes…');
     await fetchRecentDates();
@@ -1249,7 +1299,7 @@ function demUrl(rr){
   const s=map.getSize(),sc=Math.min(1,1100/Math.max(s.x,s.y)),w=Math.round(s.x*sc),h=Math.round(s.y*sc); // cap render size for speed
   return `${DEM_ALL}/exportImage?bbox=${sw.x},${sw.y},${ne.x},${ne.y}&bboxSR=3857&imageSR=3857&size=${w},${h}&format=png&transparent=true&renderingRule=${rr}&f=image`;
 }
-function setDepthLbl(loading){const e=document.getElementById('depthLegLbl');if(e)e.textContent=loading?'🌊 rendering…':`🌊 ${Math.round(depthInterval/0.3048)}-ft contours`;}
+function setDepthLbl(loading){const e=document.getElementById('depthLegLbl');if(e)e.textContent=loading?'rendering…':`${Math.round(depthInterval/0.3048)}-ft contours`;}
 function drawDepth(){ // recreate overlays for the current view; keep old until new loads (no flicker)
   if(!depthOn)return;
   const b=map.getBounds(),oldS=depthShade,oldC=depthContour;
@@ -1318,7 +1368,7 @@ function openSuggest(cd,ctx){
       <div class="ring" style="--p:${res.score};--rc:${scoreColor(res.score)}"><div class="in"><div><div class="n">${res.score}</div><div class="l">bite now</div></div></div></div>
       <div style="flex:1;min-width:0"><h2 style="margin:0 0 2px">Suggested: ${nm}</h2>
       <div class="muted" style="font-size:12.5px">${esc(cd.why)} · ${cd.lat.toFixed(4)}, ${cd.lng.toFixed(4)}</div>
-      <div class="chips" style="margin-top:7px"><span class="badge hab">🌿 mapped habitat</span>${((structCache[cd.id]||{}).tags||[]).map(t=>`<span class="badge dep">🌊 ${esc(t)}</span>`).join('')}${(cd.species||[]).map(x=>`<span class="badge">${esc(x)}</span>`).join('')}</div></div>
+      <div class="chips" style="margin-top:7px"><span class="badge hab">${ic('sprout',12)} mapped habitat</span>${((structCache[cd.id]||{}).tags||[]).map(t=>`<span class="badge dep">${ic('waves',12)} ${esc(t)}</span>`).join('')}${(cd.species||[]).map(x=>`<span class="badge">${esc(x)}</span>`).join('')}</div></div>
     </div>
     ${reasons.length?`<div class="card" style="margin:8px 0"><div style="font-weight:700;font-size:13px;margin-bottom:6px">Why it could fish</div>${reasons.map(r=>`<div style="font-size:13.5px;margin:3px 0">• ${esc(r)}</div>`).join('')}</div>`:''}
     <div class="st" style="margin-top:6px"><h2 style="font-size:16px">Best windows · next 48h</h2></div>
@@ -1400,16 +1450,16 @@ function dayCardHTML(p,ctx,bestT){
   const mn=moonInfo(p.day),code=ctx.codeAt(p.peakT);
   const winTxt=p.windows.length?p.windows.map(w=>`${fmtDate(w.start)}–${fmtDate(w.end)}`).join('  ·  '):'—';
   const chips=[];
-  if(wind!=null)chips.push(`💨 ${Math.round(wind)}mph${dir!=null?' '+deg2c(dir):''}`);
-  if(rising!=null)chips.push(`${rising?'🌊 incoming':'🌊 outgoing'}`);
-  chips.push(`${mn.emoji} ${Math.round(mn.illum*100)}%`);
+  if(wind!=null)chips.push(`${ic('wind',13)} ${Math.round(wind)}mph${dir!=null?' '+deg2c(dir):''}`);
+  if(rising!=null)chips.push(`${rising?ic('arrowUp',12)+' incoming':ic('arrowDown',12)+' outgoing'}`);
+  chips.push(`${moonSVG(mn.illum,mn.waxing,13)} ${Math.round(mn.illum*100)}%`);
   const wx=wmo(code);if(wx)chips.push(wx);
   const hint=spots.length?`<span style="float:right;font-size:11px;color:var(--teal);font-weight:700">spots ›</span>`:'';
   return `<div class="win daycard" data-day="${p.day.getTime()}" style="align-items:stretch;cursor:pointer;${isBest?'border:2px solid var(--teal);box-shadow:0 2px 12px rgba(13,125,143,.18)':''}">
     <div class="w-sc" style="background:${scoreColor(p.peak)}">${p.peak}</div>
     <div style="flex:1;min-width:0">
       <div class="w-t">${dayLabel(p.day)} <span class="muted" style="font-weight:600">${md}</span>
-        <span style="float:right;font-weight:800;color:${scoreColor(p.peak)}">${planRating(p.peak)}${isBest?' ⭐':''}</span></div>
+        <span style="float:right;font-weight:800;color:${scoreColor(p.peak)}">${planRating(p.peak)}${isBest?' '+ic('star',13):''}</span></div>
       <div class="w-r" style="margin-top:2px">Best bite <b style="color:var(--ink)">${winTxt}</b></div>
       <div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:5px;align-items:center">${chips.map(c=>`<span class="pchip">${esc(c)}</span>`).join('')}${hint}</div>
     </div></div>`;
@@ -1417,7 +1467,7 @@ function dayCardHTML(p,ctx,bestT){
 async function renderPlan(){
   const body=document.getElementById('planBody'),sel=document.getElementById('planSpot');
   const prev=sel.value;
-  sel.innerHTML='<option value="__area">📍 This area (map center)</option>'+
+  sel.innerHTML='<option value="__area">This area (map center)</option>'+
     spots.map(s=>`<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
   if(prev&&[...sel.options].some(o=>o.value===prev))sel.value=prev;
   sel.onchange=renderPlan;
@@ -1442,11 +1492,11 @@ async function renderPlan(){
     if(!days.length){body.innerHTML='<div class="empty">No forecast available right now.</div>';return;}
     const best=days.reduce((a,b)=>b.peak>a.peak?b:a);const bw=best.windows[0];
     let html=`<div class="card" style="background:linear-gradient(135deg,var(--tint),#fff);text-align:center">
-      <div class="muted" style="font-size:11.5px;font-weight:800;letter-spacing:.05em">⭐ BEST DAY THIS WEEK</div>
+      <div class="muted" style="font-size:11.5px;font-weight:800;letter-spacing:.05em">${ic('star',12)} BEST DAY THIS WEEK</div>
       <div style="font-weight:800;font-size:23px;margin-top:3px">${dayLabel(best.day)} <span class="muted" style="font-size:15px;font-weight:700">${best.day.toLocaleDateString([],{month:'short',day:'numeric'})}</span></div>
       <div style="font-size:36px;font-weight:800;color:${scoreColor(best.peak)};margin-top:1px">${best.peak}<span style="font-size:14px;color:var(--muted);font-weight:700"> /100</span></div>
       ${bw?`<div style="font-size:13.5px;margin-top:1px">Get on the water <b>${fmtDate(bw.start)}–${fmtDate(bw.end)}</b></div>`:''}
-      ${spots.length?`<button class="btn sm" id="btnBestAI" style="width:auto;margin-top:10px">🧠 Plan this day</button>`:''}</div>`;
+      ${spots.length?`<button class="btn sm" id="btnBestAI" style="width:auto;margin-top:10px">${ic('sparkle',15)} Plan this day</button>`:''}</div>`;
     html+=days.map(p=>dayCardHTML(p,ctx,best.day.getTime())).join('');
     const hrTxt=`only your on-water hours (${minToLabel(hours.startMin)}–${minToLabel(hours.endMin)})`;
     html+=spots.length
@@ -1487,14 +1537,14 @@ async function renderDayPlan(dayTime,autoAI){
     let html=`<button class="btn ghost sm" id="planBack3" style="width:auto;margin-bottom:10px">← Back to week</button>
       <div class="st"><h2 style="font-size:17px">${dayLabel(day)}'s game plan <span class="muted" style="font-weight:600;font-size:13px">${md}</span></h2></div>`;
     html+=`<div class="card" style="border:1px solid var(--line)">
-      <div class="row"><div style="font-size:20px">🧠</div>
+      <div class="row"><div style="color:var(--teal);display:flex;align-items:center">${ic('sparkle',20)}</div>
         <div style="flex:1;min-width:0"><div style="font-weight:800">AI trip plan</div>
           <div class="muted" style="font-size:12px">Fuses ${dayLabel(day)}'s forecast with your catch log</div></div>
         <button class="btn sm" id="btnDayAI" style="width:auto">Plan it</button></div>
       <div id="dayAIOut" style="margin-top:6px"></div></div>`;
     if(run.length>1){
       html+=`<div class="card" style="background:linear-gradient(135deg,var(--tint),#fff)">
-        <div style="font-weight:800;font-size:13px;margin-bottom:8px">🗺️ Suggested run — work the tide spot to spot</div>
+        <div style="font-weight:800;font-size:13px;margin-bottom:8px">${ic('route',15)} Suggested run — work the tide spot to spot</div>
         ${run.map((r,i)=>`<div style="display:flex;align-items:center;gap:9px;${i?'border-top:1px solid var(--line);':''}padding:7px 0">
           <div style="font-weight:800;font-size:13px;color:var(--teal);width:62px;flex:0 0 auto">${fmtDate(r.p.windows[0]?r.p.windows[0].start:r.p.peakT)}</div>
           <div style="flex:1;min-width:0;font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(r.s.name)}</div>
@@ -1512,9 +1562,9 @@ async function renderDayPlan(dayTime,autoAI){
           <div class="w-r" style="margin-top:2px">Hit it <b style="color:var(--ink)">${winTxt}</b></div>
           ${r.reasons.length?`<div class="w-r" style="margin-top:1px">${esc(r.reasons.join(' · '))}</div>`:''}
           <div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:5px">
-            ${wind!=null?`<span class="pchip">💨 ${Math.round(wind)}mph${dir!=null?' '+deg2c(dir):''}</span>`:''}
+            ${wind!=null?`<span class="pchip">${ic('wind',12)} ${Math.round(wind)}mph${dir!=null?' '+deg2c(dir):''}</span>`:''}
             ${r.s.structure?`<span class="pchip">${esc(labelFor(r.s.structure))}</span>`:''}
-            ${(r.s.species&&r.s.species.length)?`<span class="pchip">🎯 ${esc(r.s.species.slice(0,2).join(', '))}</span>`:''}
+            ${(r.s.species&&r.s.species.length)?`<span class="pchip">${ic('target',12)} ${esc(r.s.species.slice(0,2).join(', '))}</span>`:''}
           </div>
         </div></div>`;
     }).join('');
@@ -1579,7 +1629,7 @@ document.getElementById('saveSpot').onclick=async()=>{
   if(editingId){saved=spots.find(x=>x.id===editingId);Object.assign(saved,{name,structure:struct,species,notes,lat:pendingLatLng.lat,lng:pendingLatLng.lng});delete habCache[saved.id];saved._score=undefined;}
   else {saved={id:uid(),name,structure:struct,species,notes,lat:pendingLatLng.lat,lng:pendingLatLng.lng,created:Date.now()};spots.push(saved);}
   save();pushSpot(saved);refreshMarkers();document.getElementById('editBg').classList.remove('open');
-  toast(editingId?'Spot updated':'Spot saved 🎣');editingId=null;scoreAllSpots();
+  toast(editingId?'Spot updated':'Spot saved');editingId=null;scoreAllSpots();
 };
 document.getElementById('delSpot').onclick=()=>{
   if(!editingId)return;removeSpot(editingId);spots=spots.filter(x=>x.id!==editingId);save();refreshMarkers();
@@ -1611,7 +1661,7 @@ document.getElementById('reposSave').onclick=async()=>{
   if(!reposId)return;const s=spots.find(x=>x.id===reposId);if(!s){endReposition();return;}
   const c=map.getCenter();s.lat=c.lat;s.lng=c.lng;
   delete habCache[s.id];delete structCache[s.id];s._score=undefined;
-  save();pushSpot(s);refreshMarkers();endReposition();toast('Spot moved 📍');
+  save();pushSpot(s);refreshMarkers();endReposition();toast('Spot moved');
   try{await Promise.all([ensureHabitat(s),ensureStructure(s)]);const ctx=await getContext(s.lat,s.lng);
     s._score=scoreAt(s,ctx,new Date()).score;if(markers[s.id])markers[s.id].setIcon(pinIcon(s._score));renderSpots();}catch(e){}
 };
@@ -1621,7 +1671,7 @@ function renderSpots(){
   const wrap=document.getElementById('spotList');
   document.getElementById('spotCount').textContent=spots.length?spots.length+' saved':'';
   const syncBar=`<div class="card" style="display:flex;align-items:center;gap:11px;padding:12px 14px">
-    <div style="font-size:20px">🔗</div>
+    <div style="color:var(--teal);display:flex;align-items:center">${ic('link',20)}</div>
     <div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13px">Sync code</div>
     <div class="muted" style="font-size:11.5px">Enter this on another device to share these spots</div></div>
     <button class="btn sm ghost" id="syncBtn" style="font-family:ui-monospace,monospace;letter-spacing:.04em">${esc(syncCode)}</button></div>`;
@@ -1727,8 +1777,8 @@ async function openDetail(id){
           <div class="muted" style="font-size:12.5px">${labelFor(s.structure)} · ${s.lat.toFixed(4)}, ${s.lng.toFixed(4)}</div>
           <div class="chips" style="margin-top:7px">
             ${(s.species||[]).map(x=>`<span class="badge">${esc(x)}</span>`).join('')}
-            ${hab.tags.map(t=>`<span class="badge hab">🌿 ${esc(t)}</span>`).join('')}
-            ${(struc.tags||[]).map(t=>`<span class="badge dep">🌊 ${esc(t)}</span>`).join('')}
+            ${hab.tags.map(t=>`<span class="badge hab">${ic('sprout',12)} ${esc(t)}</span>`).join('')}
+            ${(struc.tags||[]).map(t=>`<span class="badge dep">${ic('waves',12)} ${esc(t)}</span>`).join('')}
           </div>
         </div>
       </div>
@@ -1745,7 +1795,7 @@ async function openDetail(id){
         <div class="stat"><div class="k">Wind</div><div class="v">${ctx.cur.wind_speed_10m!=null?Math.round(ctx.cur.wind_speed_10m)+'<span style="font-size:13px"> mph</span>':'—'}</div><div class="x">${ctx.cur.wind_direction_10m!=null?deg2c(ctx.cur.wind_direction_10m):''}${ctx.cur.wind_gusts_10m?' · g'+Math.round(ctx.cur.wind_gusts_10m):''}</div></div>
         <div class="stat"><div class="k">Pressure</div><div class="v">${ctx.cur.pressure_msl!=null?Math.round(ctx.cur.pressure_msl):'—'}<span style="font-size:12px"> mb</span></div><div class="x">${trendTxt(ctx.pressTrendAt(now))}</div></div>
         <div class="stat"><div class="k">Air</div><div class="v">${ctx.cur.temperature_2m!=null?Math.round(ctx.cur.temperature_2m)+'°':'—'}</div><div class="x">${wmo(ctx.cur.weather_code)}</div></div>
-        <div class="stat"><div class="k">Moon</div><div class="v" style="font-size:18px">${ctx.moon.emoji} ${Math.round(ctx.moon.illum*100)}%</div><div class="x">${ctx.moon.name}</div></div>
+        <div class="stat"><div class="k">Moon</div><div class="v" style="font-size:18px;display:flex;align-items:center;gap:6px">${moonSVG(ctx.moon.illum,ctx.moon.waxing,20)} ${Math.round(ctx.moon.illum*100)}%</div><div class="x">${ctx.moon.name}</div></div>
         <div class="stat"><div class="k">Bottom</div><div class="v">${struc.depthFt!=null?struc.depthFt.toFixed(1)+'<span style="font-size:13px"> ft</span>':'—'}</div><div class="x">${struc.noData?'no DEM here':[(struc.reliefFt!=null?struc.reliefFt.toFixed(1)+' ft relief':''),(struc.feature&&struc.feature!=='flat'?struc.feature:'')].filter(Boolean).join(' · ')||'~3 m DEM'}</div></div>
       </div>
       <div class="card" style="margin-top:12px">
@@ -1754,7 +1804,7 @@ async function openDetail(id){
         ${res.hab!==1?`<div class="muted" style="font-size:12px;margin-top:6px">Habitat multiplier: ×${res.hab.toFixed(2)}</div>`:''}
       </div>
       ${s.notes?`<div class="card" style="font-size:14px;line-height:1.55"><div style="font-weight:700;font-size:13px;margin-bottom:5px">Notes</div>${esc(s.notes).replace(/\n/g,'<br>')}</div>`:''}
-      <button class="btn" id="logFromDetail" style="margin-top:4px">🎣 Log a catch here</button>
+      <button class="btn" id="logFromDetail" style="margin-top:4px">${ic('fish',15)} Log a catch here</button>
       <div style="height:8px"></div>
       <button class="btn ghost" id="editFromDetail">Edit spot</button>
       <div style="height:8px"></div><button class="btn ghost" id="closeDetail">Close</button>
@@ -1834,7 +1884,7 @@ async function renderToday(){
     const m=ctx.moon;const now=new Date();const nowScore=scoreAt(probe,ctx,now).score;
     body.innerHTML=`
       <div class="card" style="text-align:center;background:linear-gradient(135deg,var(--tint),#fff)">
-        <div style="font-size:44px;line-height:1">${m.emoji}</div>
+        <div style="line-height:1">${moonSVG(m.illum,m.waxing,52)}</div>
         <div style="font-weight:800;font-size:19px;margin-top:4px">${m.name}</div>
         <div class="muted" style="font-size:13px">${Math.round(m.illum*100)}% illuminated · water ${ctx.water!=null?ctx.water+'°F':'—'}</div>
         <div style="margin-top:10px;font-weight:800;font-size:34px;color:${scoreColor(nowScore)}">${nowScore}<span style="font-size:15px;color:var(--muted);font-weight:700"> /100 now</span></div>
@@ -1886,7 +1936,7 @@ async function runPatternAgent(){
   btn.disabled=true;out.innerHTML='<div class="ld">Gathering your spots & conditions…</div>';
   try{
     const payload=await buildSnapshot();
-    out.innerHTML='<div class="ld">🧠 Reading your spots…</div>';
+    out.innerHTML='<div class="ld">Reading your spots…</div>';
     const r=await fetch(AGENT_URL,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+SB_ANON,'apikey':SB_ANON},
       body:JSON.stringify({instruction:"Find actionable patterns across these spots for planning the next couple days at Port O'Connor.",payload})}).then(r=>r.json());
     if(r&&r.error)out.innerHTML=`<div class="empty" style="padding:14px 4px">${esc(r.error)}</div>`;
@@ -1942,7 +1992,7 @@ function renderCatches(){
   catches.slice().sort((a,b)=>new Date(b.caught_at)-new Date(a.caught_at)).forEach(c=>{
     const cd=c.conditions||{},d=new Date(c.caught_at),blank=c.kind==='blank';
     const el=document.createElement('div');el.className='spot';
-    el.innerHTML=`<div class="ic"${blank?' style="background:#eef1f3;filter:grayscale(1)"':''}>${blank?'🚫':'🐟'}</div>
+    el.innerHTML=`<div class="ic"${blank?' style="background:#eef1f3;color:#94a3b8"':''}>${blank?ic('ban',20):ic('fish',20)}</div>
       <div style="flex:1;min-width:0"><div class="nm">${blank?'No fish':((c.count>1?c.count+'× ':'')+esc(c.species)+(c.length_in?` · ${c.length_in}"`:''))}</div>
       <div class="meta">${esc(c.spot_name||'spot')} · ${d.toLocaleDateString([],{month:'short',day:'numeric'})} ${fmtDate(d)}${cd.tide?' · '+cd.tide:''}${cd.waterTempF!=null?' · '+cd.waterTempF+'°':''}${cd.bottom&&cd.bottom.feature?' · '+cd.bottom.feature:''}</div></div>
       <button data-del="${c.id}" style="border:none;background:none;color:var(--muted);font-size:17px;padding:6px 4px">✕</button>`;
@@ -1954,7 +2004,7 @@ function renderCatches(){
 async function runCatchAgent(){
   const out=document.getElementById('catchAgentOut'),btn=document.getElementById('btnCatchAgent');
   if(catches.length<2){out.innerHTML='<div class="muted" style="font-size:13px;margin-top:8px">Log a few catches first — I need a handful to find real patterns.</div>';return;}
-  btn.disabled=true;out.innerHTML='<div class="ld">🧠 Studying your catches…</div>';
+  btn.disabled=true;out.innerHTML='<div class="ld">Studying your catches…</div>';
   try{
     const payload={ area:"Port O'Connor, TX",
       catches:catches.slice(0,80).map(c=>({kind:c.kind||'catch',species:c.species,count:c.count,length_in:c.length_in,spot:c.spot_name,structure:c.structure,bait:c.bait,when:c.caught_at,conditions:c.conditions})),
@@ -1969,7 +2019,7 @@ async function runCatchAgent(){
 // AI trip plan for a specific day: fuse this day's per-spot forecast with the angler's catch log
 async function runDayAI(day,hours,rows){
   const out=document.getElementById('dayAIOut'),btn=document.getElementById('btnDayAI');
-  btn.disabled=true;out.innerHTML='<div class="ld">🧠 Matching '+dayLabel(day)+' to your log…</div>';
+  btn.disabled=true;out.innerHTML='<div class="ld">Matching '+dayLabel(day)+' to your log…</div>';
   try{
     const candidateSpots=rows.map(r=>{
       const t=r.p.peakT,rising=r.ctx.tide.pts.length?slopeAt(r.ctx.tide,t)>0:null,w=r.ctx.windAt(t),wd=r.ctx.windDirAt(t);
@@ -2021,10 +2071,10 @@ async function saveLog(kind){
   }else{
     const cat={id:uid(),kind:eff,spot_id:lc.spotId,spot_name:lc.spotName,lat:lc.lat,lng:lc.lng,species:lc.species||'(target unspecified)',count:eff==='catch'?lc.count:0,length_in:len,bait,notes,structure:lc.structure,conditions:cond,caught_at:when.toISOString()};
     catches.unshift(cat);saveCatches();pushCatch(cat);
-    document.getElementById('logBg').classList.remove('open');toast(eff==='catch'?'Catch logged 🎣':'Slow session logged');
+    document.getElementById('logBg').classList.remove('open');toast(eff==='catch'?'Catch logged':'Slow session logged');
   }
   calibrateWeights();scoreAllSpots().then(()=>renderSpots());renderCatches();
-  save.disabled=blank.disabled=false;save.textContent='Save catch';blank.textContent='🚫 No fish — log this slow session';logState=null;
+  save.disabled=blank.disabled=false;save.textContent='Save catch';blank.innerHTML=ic('ban',15)+'No fish — log this slow session';logState=null;
 }
 document.getElementById('logSave').onclick=()=>saveLog('catch');
 document.getElementById('logBlank').onclick=()=>saveLog('blank');
@@ -2050,7 +2100,7 @@ document.getElementById('lureBtn').onclick=()=>document.getElementById('lureImg'
 document.getElementById('lureImg').onchange=async(e)=>{
   const file=e.target.files&&e.target.files[0]; if(!file)return;
   const out=document.getElementById('lureOut'),btn=document.getElementById('lureBtn');
-  btn.disabled=true;out.textContent='📷 Reading lure…';
+  btn.disabled=true;out.textContent='Reading lure…';
   try{
     const b64=await downscaleToBase64(file,768,0.8);
     const r=await fetch(LURE_URL,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+SB_ANON,'apikey':SB_ANON},
@@ -2090,7 +2140,7 @@ function moonInfo(date){
   let age=(((date.getTime()/864e5-ref)%syn)+syn)%syn;
   const illum=(1-Math.cos(2*Math.PI*age/syn))/2;
   const names=[[1.5,'New Moon','🌑'],[5.5,'Waxing Crescent','🌒'],[9.5,'First Quarter','🌓'],[13.8,'Waxing Gibbous','🌔'],[16.6,'Full Moon','🌕'],[20.5,'Waning Gibbous','🌖'],[24,'Last Quarter','🌗'],[28,'Waning Crescent','🌘'],[30,'New Moon','🌑']];
-  const f=names.find(n=>age<n[0])||names[8];return {age,illum,name:f[1],emoji:f[2]};
+  const f=names.find(n=>age<n[0])||names[8];return {age,illum,name:f[1],emoji:f[2],waxing:age<syn/2};
 }
 function moonRiseSet(lat,lng,date){
   function moonPos(d){const R=Math.PI/180;const L=218.316+13.176396*d,M=134.963+13.064993*d,F=93.272+13.229350*d;
@@ -2123,6 +2173,7 @@ async function loadHeader(lat,lng,label){
 }
 
 /* ============================ BOOT ============================ */
+hydrateIcons(); // swap all static data-ic placeholders (header, nav, map buttons, sheets) for SVG icons
 initMap();renderSpots();applyOceanEnabled(); // ocean layers off by default; hidden unless enabled in Settings
 // base map is restored inside initMap() via applyBasemap()
 if(window.innerWidth>=980){const sb=document.querySelector('.nav button[data-tab="Spots"]');if(sb)sb.click();} // desktop: map always shown, open Spots panel
