@@ -394,7 +394,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v37';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v38';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -1461,6 +1461,12 @@ async function renderDayPlan(dayTime){
     const md=day.toLocaleDateString([],{weekday:'long',month:'short',day:'numeric'});
     let html=`<button class="btn ghost sm" id="planBack3" style="width:auto;margin-bottom:10px">← Back to week</button>
       <div class="st"><h2 style="font-size:17px">${dayLabel(day)}'s game plan <span class="muted" style="font-weight:600;font-size:13px">${md}</span></h2></div>`;
+    html+=`<div class="card" style="border:1px solid var(--line)">
+      <div class="row"><div style="font-size:20px">🧠</div>
+        <div style="flex:1;min-width:0"><div style="font-weight:800">AI trip plan</div>
+          <div class="muted" style="font-size:12px">Fuses ${dayLabel(day)}'s forecast with your catch log</div></div>
+        <button class="btn sm" id="btnDayAI" style="width:auto">Plan it</button></div>
+      <div id="dayAIOut" style="margin-top:6px"></div></div>`;
     if(run.length>1){
       html+=`<div class="card" style="background:linear-gradient(135deg,var(--tint),#fff)">
         <div style="font-weight:800;font-size:13px;margin-bottom:8px">🗺️ Suggested run — work the tide spot to spot</div>
@@ -1490,6 +1496,7 @@ async function renderDayPlan(dayTime){
     html+=`<div class="src">Each spot scored with its own structure, habitat &amp; target species for ${dayLabel(day)}, within your on-water hours (${minToLabel(hours.startMin)}–${minToLabel(hours.endMin)}). Times are local. Recheck wind the morning of.</div>`;
     body.innerHTML=html;
     document.getElementById('planBack3').onclick=renderPlan;
+    document.getElementById('btnDayAI').onclick=()=>runDayAI(day,hours,rows);
   }catch(e){body.innerHTML=`<button class="btn ghost sm" id="planBack4" style="width:auto;margin-bottom:10px">← Back to week</button><div class="empty">Couldn't build the day plan. ${esc(e.message||'')}</div>`;const b=document.getElementById('planBack4');if(b)b.onclick=renderPlan;}
 }
 
@@ -1931,6 +1938,34 @@ async function runCatchAgent(){
     if(r&&r.error)out.innerHTML=`<div class="empty" style="padding:14px 4px">${esc(r.error)}</div>`;
     else out.innerHTML=`<div style="font-size:14px;line-height:1.6;margin-top:6px">${mdLite(r.text||'(no response)')}</div><div class="src">From your ${catches.length} logged catches via Ollama (${esc(r.model||'')}). The more you log, the sharper this gets.</div>`;
   }catch(e){out.innerHTML=`<div class="empty" style="padding:14px 4px">Couldn't reach the AI. ${esc(e.message||'')}</div>`;}
+  btn.disabled=false;
+}
+// AI trip plan for a specific day: fuse this day's per-spot forecast with the angler's catch log
+async function runDayAI(day,hours,rows){
+  const out=document.getElementById('dayAIOut'),btn=document.getElementById('btnDayAI');
+  btn.disabled=true;out.innerHTML='<div class="ld">🧠 Matching '+dayLabel(day)+' to your log…</div>';
+  try{
+    const candidateSpots=rows.map(r=>{
+      const t=r.p.peakT,rising=r.ctx.tide.pts.length?slopeAt(r.ctx.tide,t)>0:null,w=r.ctx.windAt(t),wd=r.ctx.windDirAt(t);
+      return {
+        name:r.s.name, structure:labelFor(r.s.structure), species:r.s.species||[],
+        engineScore:r.p.peak, bestWindows:r.p.windows.map(x=>`${fmtDate(x.start)}–${fmtDate(x.end)}`),
+        forecastAtPrime:{ tide:rising==null?null:(rising?'incoming/rising':'outgoing/falling'),
+          windMph:w!=null?Math.round(w):null, windDir:wd!=null?deg2c(wd):null,
+          pressureTrend:trendTxt(r.ctx.pressTrendAt(t)), waterTempF:r.ctx.water, moon:r.ctx.moon.name },
+        engineReasons:r.reasons };
+    });
+    const payload={ area:"Port O'Connor / Matagorda & Espiritu Santo Bays, TX",
+      trip:{ day:day.toLocaleDateString([],{weekday:'long',month:'short',day:'numeric'}),
+        onWaterHours:`${minToLabel(hours.startMin)}–${minToLabel(hours.endMin)}` },
+      candidateSpots,
+      catchHistory:catches.slice(0,80).map(c=>({kind:c.kind||'catch',species:c.species,count:c.count,length_in:c.length_in,spot:c.spot_name,structure:c.structure,bait:c.bait,when:c.caught_at,conditions:c.conditions})) };
+    const instruction="The angler is planning a trip on trip.day and will be on the water only during trip.onWaterHours. `candidateSpots` are THEIR saved spots, each with this day's forecast at that spot's prime bite window and the scoring engine's 0-100 rating. `catchHistory` is their logged sessions: kind:'catch' produced fish (see count); kind:'blank' means they FISHED those conditions and caught NOTHING — each has the exact conditions captured at the time. Write a concrete trip plan for THIS day: an ordered list (3-5 stops max) of which candidate spots to fish and at what times, staying inside the on-water hours. Ground EVERY pick in their history — cite hit rates and matching conditions (e.g. 'you've boated trout here on 3 of 4 falling-tide SE-wind mornings, and "+day.toLocaleDateString([],{weekday:'long'})+" matches'). Warn them off any candidate whose forecast matches conditions where they've historically struck out. Respect the engine score but override it when their own log disagrees, and say why. End with one bait/approach tip drawn from their log. If their history is too thin to be confident, say so plainly, lean on the forecast + engine score for the order, and tell them exactly what to log to sharpen this. Keep it punchy and skimmable.";
+    const r=await fetch(AGENT_URL,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+SB_ANON,'apikey':SB_ANON},
+      body:JSON.stringify({instruction,payload})}).then(r=>r.json());
+    if(r&&r.error)out.innerHTML=`<div class="empty" style="padding:12px 4px">${esc(r.error)}</div>`;
+    else out.innerHTML=`<div style="font-size:14px;line-height:1.6;margin-top:6px">${mdLite(r.text||'(no response)')}</div><div class="src">${dayLabel(day)}'s forecast × your ${catches.length} logged session${catches.length===1?'':'s'} via Ollama (${esc(r.model||'')}). The more you log, the sharper this gets.</div>`;
+  }catch(e){out.innerHTML=`<div class="empty" style="padding:12px 4px">Couldn't reach the AI. ${esc(e.message||'')}</div>`;}
   btn.disabled=false;
 }
 document.getElementById('btnLogCatch').onclick=()=>openLog({});
