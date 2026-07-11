@@ -420,7 +420,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v46';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v47';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -434,16 +434,51 @@ const AGENT_URL=SB_URL+'/functions/v1/ollama-agent';
 const sb=(window.supabase&&window.supabase.createClient)?window.supabase.createClient(SB_URL,SB_KEY):null;
 let syncCode=localStorage.getItem('saltspots.sync')||genSync();
 function genSync(){const c='POC-'+Math.random().toString(36).slice(2,7).toUpperCase();localStorage.setItem('saltspots.sync',c);return c;}
+/* ---- Optional sign-in (Apple) ----
+   Rows with user_id = NULL are "unclaimed" and readable with the anon key — that's
+   how this app has always worked, and it still does when signed out.
+   Once a log is *claimed* (from the iOS app), only its owner/members can see it, so
+   the browser has to authenticate as that same user to keep working. Signing in here
+   does exactly that; supabase-js then attaches the session token to every query. */
+let authUser=null;      // signed-in Supabase user, or null
+let logOwner=null;      // user_id that owns the current sync log (null = unclaimed)
+
+async function initAuth(){
+  if(!sb)return;
+  try{
+    const {data}=await sb.auth.getSession();
+    authUser=data?.session?.user||null;
+    sb.auth.onAuthStateChange((_e,s)=>{authUser=s?.user||null;renderSpots();});
+  }catch(e){console.warn('auth',e);}
+}
+async function signInApple(){
+  if(!sb)return;
+  const {error}=await sb.auth.signInWithOAuth({
+    provider:'apple',
+    options:{redirectTo:location.href.split('#')[0]}
+  });
+  if(error)toast('Sign-in failed: '+error.message);
+}
+async function signOutAuth(){
+  if(!sb)return;
+  await sb.auth.signOut();authUser=null;toast('Signed out');renderSpots();
+}
+/* Ownership stamp for writes. If the log is claimed, keep the OWNER on every row —
+   otherwise a member's edits would silently re-own the row and the owner would lose
+   sight of it. If it's unclaimed, leave null so the anon path keeps working. */
+function ownerStamp(){return (authUser&&logOwner)?logOwner:null;}
+
 function rowToSpot(r){return {id:r.id,name:r.name,structure:r.structure||'',species:Array.isArray(r.species)?r.species:[],notes:r.notes||'',lat:r.lat,lng:r.lng,created:r.created_at?new Date(r.created_at).getTime():Date.now()};}
 async function pullSpots(){
   if(!sb)return null;
   const {data,error}=await sb.from('salt_spots').select('*').eq('sync_code',syncCode).order('created_at',{ascending:true});
   if(error){console.warn('pull',error.message);return null;}
+  logOwner=(data.find(r=>r.user_id)||{}).user_id||null;   // who owns this log, if anyone
   return data.map(rowToSpot);
 }
 async function pushSpot(s){
   if(!sb)return;
-  const {error}=await sb.from('salt_spots').upsert({id:s.id,sync_code:syncCode,name:s.name,structure:s.structure,species:s.species,notes:s.notes,lat:s.lat,lng:s.lng,updated_at:new Date().toISOString()});
+  const {error}=await sb.from('salt_spots').upsert({id:s.id,sync_code:syncCode,name:s.name,structure:s.structure,species:s.species,notes:s.notes,lat:s.lat,lng:s.lng,updated_at:new Date().toISOString(),user_id:ownerStamp()});
   if(error)console.warn('push',error.message);
 }
 async function removeSpot(id){if(!sb)return;const {error}=await sb.from('salt_spots').delete().eq('id',id);if(error)console.warn('del',error.message);}
@@ -453,7 +488,7 @@ const LSC='saltspots.catches.v1';
 let catches=loadCatches();
 function loadCatches(){try{return JSON.parse(localStorage.getItem(LSC))||[]}catch(e){return[]}}
 function saveCatches(){localStorage.setItem(LSC,JSON.stringify(catches))}
-function catchRow(c){return {id:c.id,sync_code:syncCode,kind:c.kind||'catch',spot_id:c.spot_id,spot_name:c.spot_name,lat:c.lat,lng:c.lng,species:c.species,count:c.count,length_in:c.length_in,bait:c.bait,notes:c.notes,structure:c.structure,conditions:c.conditions,caught_at:c.caught_at};}
+function catchRow(c){return {id:c.id,sync_code:syncCode,kind:c.kind||'catch',spot_id:c.spot_id,spot_name:c.spot_name,lat:c.lat,lng:c.lng,species:c.species,count:c.count,length_in:c.length_in,bait:c.bait,notes:c.notes,structure:c.structure,conditions:c.conditions,caught_at:c.caught_at,user_id:ownerStamp()};}
 async function pullCatches(){
   if(!sb)return null;
   const {data,error}=await sb.from('salt_catches').select('*').eq('sync_code',syncCode).order('caught_at',{ascending:false});
@@ -1692,9 +1727,11 @@ function renderSpots(){
     <div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13px">Sync code</div>
     <div class="muted" style="font-size:11.5px">Enter this on another device to share these spots</div></div>
     <button class="btn sm ghost" id="syncBtn" style="font-family:ui-monospace,monospace;letter-spacing:.04em">${esc(syncCode)}</button></div>`;
-  if(!spots.length){wrap.innerHTML=syncBar+'<div class="empty">No spots yet.<br>Open the Map and tap your water to drop your first one.</div>';wireSync();return}
+  const acctBar=authBar();
+  if(!spots.length){wrap.innerHTML=syncBar+acctBar+'<div class="empty">No spots yet.<br>Open the Map and tap your water to drop your first one.</div>';wireSync();wireAuth();return}
   const sorted=spots.slice().sort((a,b)=>(b._score??-1)-(a._score??-1));
-  wrap.innerHTML=syncBar;
+  wrap.innerHTML=syncBar+acctBar;
+  wireAuth();
   sorted.forEach(s=>{
     const el=document.createElement('div');el.className='spot';
     const sc=s._score;
@@ -1707,6 +1744,27 @@ function renderSpots(){
   wireSync();
 }
 function wireSync(){const b=document.getElementById('syncBtn');if(b)b.onclick=changeSync;}
+/* Account row: only needed once a log has been claimed from the iOS app — but it's
+   always offered, and signing out returns you to exactly the old behaviour. */
+function authBar(){
+  if(!sb)return '';
+  const signedIn=!!authUser;
+  const who=signedIn?(authUser.email||'Apple ID'):'';
+  const sub=signedIn
+    ? 'Your claimed spots are visible here'
+    : (logOwner? 'This log is private — sign in to see it' : 'Optional — needed only for logs you\'ve made private');
+  return `<div class="card" style="display:flex;align-items:center;gap:11px;padding:12px 14px;margin-top:8px">
+    <div style="color:var(--teal);display:flex;align-items:center">${ic('star',20)}</div>
+    <div style="flex:1;min-width:0">
+      <div style="font-weight:700;font-size:13px">${signedIn?esc(who):'Account'}</div>
+      <div class="muted" style="font-size:11.5px">${esc(sub)}</div>
+    </div>
+    <button class="btn sm ghost" id="authBtn">${signedIn?'Sign out':'Sign in'}</button></div>`;
+}
+function wireAuth(){
+  const b=document.getElementById('authBtn');
+  if(b)b.onclick=()=>authUser?signOutAuth():signInApple();
+}
 async function changeSync(){
   const c=prompt('Sync code — enter the same code on each device to share spots & catches:',syncCode);
   if(!c||!c.trim())return;
@@ -2315,6 +2373,7 @@ function sizeMap(){const el=document.getElementById('map');if(!el)return;
 sizeMap();window.addEventListener('resize',sizeMap);window.addEventListener('load',sizeMap);window.addEventListener('orientationchange',()=>setTimeout(sizeMap,250));
 async function boot(lat,lng,label){
   loadHeader(lat,lng,label);
+  await initAuth();   // before the pulls, so a signed-in session is attached to them
   const [cloud,cloudC]=await Promise.all([pullSpots().catch(()=>null),pullCatches().catch(()=>null)]); // localStorage already painted
   if(cloud){spots=cloud;save();refreshMarkers();}
   if(cloudC){catches=cloudC;saveCatches();}
