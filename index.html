@@ -355,6 +355,11 @@
     <button class="btn ghost" id="logPlus" style="width:46px;padding:10px 0;font-size:20px">＋</button>
     <input class="in" id="logLen" placeholder="length in. (opt)" inputmode="decimal" style="flex:1">
   </div>
+  <div class="row" style="gap:9px;margin-top:7px">
+    <button class="btn sm ghost" id="logKept" style="flex:1">Kept</button>
+    <button class="btn sm ghost" id="logRel" style="flex:1">Released</button>
+  </div>
+  <div class="muted" id="logReg" style="font-size:12px;margin:8px 2px"></div>
   <label class="fld">Bait / lure (optional)</label>
   <input class="in" id="logBait" placeholder="e.g. gold spoon, live shrimp, paddletail">
   <div class="row" style="margin-top:7px;gap:9px">
@@ -390,6 +395,19 @@
     <button class="btn sm ghost" id="setSyncBtn" style="width:auto">Change</button></div>
   </div>
   <div class="card">
+    <div style="font-weight:700;margin-bottom:3px">Fishing regulations</div>
+    <div class="muted" style="font-size:12px;margin-bottom:9px">Size &amp; bag limits for your state. Always confirm with the official source.</div>
+    <div class="row" style="gap:9px">
+      <select class="in" id="setState" style="flex:1"></select>
+      <button class="btn sm ghost" id="setRegs" style="width:auto">View</button>
+    </div>
+    <div style="height:8px"></div>
+    <button class="btn sm ghost" id="setFishId" style="width:auto"><span class="bi" data-ic="camera" data-sz="15" style="margin-right:5px"></span>Identify a fish from a photo</button>
+    <input type="file" id="fishImg" accept="image/*" capture="environment" style="display:none">
+    <div id="fishOut" style="font-size:13px;margin-top:9px"></div>
+    <div id="regsOut" style="font-size:13px;margin-top:9px;display:none"></div>
+  </div>
+  <div class="card">
     <div style="font-weight:700;margin-bottom:3px">Model calibration</div>
     <div class="muted" style="font-size:12px;margin-bottom:8px">The engine tunes its weights toward what your catches vs. slow sessions show.</div>
     <div id="setCalib" style="font-size:13px"></div>
@@ -420,7 +438,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v47';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v48';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -468,6 +486,40 @@ async function signOutAuth(){
    sight of it. If it's unclaimed, leave null so the anon path keeps working. */
 function ownerStamp(){return (authUser&&logOwner)?logOwner:null;}
 
+/* ---- Sharing: revocable invite tokens (the 5-char sync code is a weak secret) ---- */
+async function claimMyData(){
+  if(!authUser)return toast('Sign in first');
+  if(!confirm(`Make this log private to your account?\n\nYour ${spots.length} spots and ${catches.length} catches (code ${syncCode}) become yours alone. Anyone using just the sync code — including a signed-out browser — loses access.`))return;
+  const a=await sb.from('salt_spots').update({user_id:authUser.id}).eq('sync_code',syncCode).is('user_id',null).select('id');
+  const b=await sb.from('salt_catches').update({user_id:authUser.id}).eq('sync_code',syncCode).is('user_id',null).select('id');
+  if(a.error||b.error)return toast('Claim failed: '+((a.error||b.error).message||''));
+  logOwner=authUser.id;
+  toast(`Claimed ${(a.data||[]).length} spots · ${(b.data||[]).length} catches`);
+  renderSpots();
+}
+async function createInvite(){
+  if(!authUser)return toast('Sign in first');
+  const label=prompt('Who is this invite for? (e.g. Dad)')||null;
+  const token=Array.from({length:32},()=>'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random()*32)]).join('');
+  const {error}=await sb.from('salt_shares').insert({owner_id:authUser.id,sync_code:syncCode,invite_token:token,label});
+  if(error)return toast('Invite failed: '+error.message);
+  try{await navigator.clipboard.writeText(token);toast('Invite code copied');}catch(e){toast('Invite created');}
+  prompt('Send this invite code to your buddy:',token);
+}
+async function redeemInvite(){
+  if(!authUser)return toast('Sign in first');
+  const t=prompt('Paste the invite code you were sent:');
+  if(!t||!t.trim())return;
+  const {data,error}=await sb.rpc('redeem_share',{token:t.trim()});
+  if(error)return toast('Invite invalid or already used');
+  const row=Array.isArray(data)?data[0]:data;
+  if(!row)return toast('Invite invalid or already used');
+  syncCode=row.sync_code;localStorage.setItem('saltspots.sync',syncCode);
+  toast('Joined the shared log');
+  const [c1,c2]=await Promise.all([pullSpots(),pullCatches()]);
+  spots=c1||[];catches=c2||[];save();saveCatches();refreshMarkers();renderSpots();renderCatches();scoreAllSpots().then(()=>renderSpots());
+}
+
 function rowToSpot(r){return {id:r.id,name:r.name,structure:r.structure||'',species:Array.isArray(r.species)?r.species:[],notes:r.notes||'',lat:r.lat,lng:r.lng,created:r.created_at?new Date(r.created_at).getTime():Date.now()};}
 async function pullSpots(){
   if(!sb)return null;
@@ -488,15 +540,72 @@ const LSC='saltspots.catches.v1';
 let catches=loadCatches();
 function loadCatches(){try{return JSON.parse(localStorage.getItem(LSC))||[]}catch(e){return[]}}
 function saveCatches(){localStorage.setItem(LSC,JSON.stringify(catches))}
-function catchRow(c){return {id:c.id,sync_code:syncCode,kind:c.kind||'catch',spot_id:c.spot_id,spot_name:c.spot_name,lat:c.lat,lng:c.lng,species:c.species,count:c.count,length_in:c.length_in,bait:c.bait,notes:c.notes,structure:c.structure,conditions:c.conditions,caught_at:c.caught_at,user_id:ownerStamp()};}
+function catchRow(c){return {id:c.id,sync_code:syncCode,kind:c.kind||'catch',spot_id:c.spot_id,spot_name:c.spot_name,lat:c.lat,lng:c.lng,species:c.species,count:c.count,length_in:c.length_in,bait:c.bait,notes:c.notes,structure:c.structure,conditions:c.conditions,caught_at:c.caught_at,released:!!c.released,user_id:ownerStamp()};}
 async function pullCatches(){
   if(!sb)return null;
   const {data,error}=await sb.from('salt_catches').select('*').eq('sync_code',syncCode).order('caught_at',{ascending:false});
   if(error){console.warn('pullC',error.message);return null;}
-  return data.map(r=>({id:r.id,kind:r.kind||'catch',spot_id:r.spot_id,spot_name:r.spot_name,lat:r.lat,lng:r.lng,species:r.species,count:r.count,length_in:r.length_in,bait:r.bait,notes:r.notes,structure:r.structure,conditions:r.conditions||{},caught_at:r.caught_at}));
+  return data.map(r=>({id:r.id,kind:r.kind||'catch',spot_id:r.spot_id,spot_name:r.spot_name,lat:r.lat,lng:r.lng,species:r.species,count:r.count,length_in:r.length_in,bait:r.bait,notes:r.notes,structure:r.structure,conditions:r.conditions||{},caught_at:r.caught_at,released:!!r.released}));
 }
 async function pushCatch(c){if(!sb)return;const {error}=await sb.from('salt_catches').upsert(catchRow(c));if(error)console.warn('pushC',error.message);}
 async function removeCatch(id){if(!sb)return;await sb.from('salt_catches').delete().eq('id',id);}
+
+/* ===================== REGULATIONS (mirrors the iOS app) =====================
+   A convenience summary, NOT legal authority: rules change often and vary by zone
+   and season. Every screen that shows a limit also links the official source. */
+const REG_DISCLAIMER='Unofficial summary — confirm every limit with the official state regulations before you keep a fish.';
+const REG_REVIEWED='July 2026';
+const STATES={
+  TX:{name:'Texas',agency:'Texas Parks & Wildlife (TPWD)',url:'https://tpwd.texas.gov/regulations/outdoor-annual/fishing/saltwater-fishing'},
+  LA:{name:'Louisiana',agency:'LA Dept. of Wildlife & Fisheries',url:'https://www.wlf.louisiana.gov/page/saltwater-sportfishing-regulations'},
+  MS:{name:'Mississippi',agency:'MS Dept. of Marine Resources',url:'https://dmr.ms.gov/recreational-fishing/'},
+  AL:{name:'Alabama',agency:'Alabama Marine Resources',url:'https://www.outdooralabama.com/saltwater-fishing/saltwater-size-and-creel-limits'},
+  FL:{name:'Florida',agency:'Florida Fish & Wildlife (FWC)',url:'https://myfwc.com/fishing/saltwater/recreational/'},
+  GA:{name:'Georgia',agency:'Georgia DNR Coastal Resources',url:'https://coastalgadnr.org/RecFishingRegs'},
+  SC:{name:'South Carolina',agency:'SCDNR',url:'https://www.dnr.sc.gov/fish/saltwater.html'},
+  NC:{name:'North Carolina',agency:'NC Marine Fisheries',url:'https://www.deq.nc.gov/about/divisions/marine-fisheries/recreational-fishing/recreational-size-and-bag-limits'},
+};
+/* [species, min, max(slot), bag, note] — min/max in inches, null = none */
+const REGS={
+  TX:[['Red drum (Redfish)',20,28,3,'One over 28 in allowed with a tag.'],['Spotted seatrout',15,20,3,'Slot; one over 30 in per day.'],['Black drum',14,30,5,null],['Flounder',15,null,5,'November closure — check dates.'],['Sheepshead',15,null,5,null],['Gray (mangrove) snapper',15,null,5,null],['Tarpon',85,null,1,'Effectively catch-and-release.']],
+  FL:[['Red drum (Redfish)',18,27,1,'Bag/zone rules vary by region.'],['Spotted seatrout',15,19,3,'Slot; one over 19 in per vessel.'],['Snook',28,33,1,'Permit required; seasonal closures.'],['Black drum',14,24,5,null],['Flounder',14,null,5,null],['Sheepshead',12,null,8,null],['Gray (mangrove) snapper',10,null,5,null],['Tarpon',null,null,0,'Catch-and-release; tag to possess.']],
+  LA:[['Red drum (Redfish)',16,27,5,'One over 27 in per day.'],['Spotted seatrout',13,null,15,'Limits changed recently — confirm.'],['Black drum',16,27,5,null],['Flounder',12,null,10,null],['Sheepshead',null,null,null,null]],
+  MS:[['Red drum (Redfish)',18,30,3,null],['Spotted seatrout',15,null,15,null],['Black drum',14,null,null,null],['Flounder',14,null,null,null],['Sheepshead',12,null,null,null]],
+  AL:[['Red drum (Redfish)',16,26,3,'One over 26 in per day.'],['Spotted seatrout',15,null,6,null],['Flounder',14,null,5,null],['Sheepshead',12,null,10,null]],
+  GA:[['Red drum (Redfish)',14,23,5,null],['Spotted seatrout',14,null,15,null],['Flounder',15,null,15,null],['Sheepshead',null,null,null,null]],
+  SC:[['Red drum (Redfish)',15,23,2,null],['Spotted seatrout',14,null,10,null],['Flounder',16,null,5,null],['Sheepshead',14,null,10,null]],
+  NC:[['Red drum (Redfish)',18,27,1,null],['Spotted seatrout',14,null,4,'Subject to closures.'],['Flounder',15,null,1,'Very limited season.'],['Sheepshead',10,null,null,null]],
+};
+let homeState=localStorage.getItem('saltspots.state')||'TX';
+function setHomeState(s){homeState=s;localStorage.setItem('saltspots.state',s);}
+function regsFor(st){return REGS[st||homeState]||[];}
+/* Map a species name (incl. AI-identified aliases) onto a regulation row. */
+function regMatch(name,st){
+  const q=(name||'').toLowerCase().replace(/[()]/g,' ').replace(/\s+/g,' ').trim();
+  if(!q)return null;
+  const rows=regsFor(st);
+  const norm=r=>r[0].toLowerCase().replace(/[()]/g,' ').replace(/\s+/g,' ').trim();
+  let hit=rows.find(r=>norm(r).includes(q)||q.includes(norm(r)));
+  if(hit)return hit;
+  const alias=[[['redfish','red drum','spottail'],'red drum'],[['trout','seatrout','speck'],'seatrout'],
+    [['snook','linesider'],'snook'],[['black drum'],'black drum'],[['flounder','fluke'],'flounder'],
+    [['sheepshead','convict'],'sheepshead'],[['mangrove','gray snapper','grey snapper'],'snapper'],
+    [['tarpon','silver king'],'tarpon']];
+  for(const [keys,canon] of alias){ if(keys.some(k=>q.includes(k))){ hit=rows.find(r=>norm(r).includes(canon)); if(hit)return hit; } }
+  return null;
+}
+function lenText(r){const lo=r[1],hi=r[2];
+  if(lo!=null&&hi!=null)return `${lo}–${hi} in slot`;
+  if(lo!=null)return `≥ ${lo} in`;
+  if(hi!=null)return `≤ ${hi} in`;
+  return 'no min size';}
+function bagText(r){return r[3]!=null?`${r[3]} / day`:'see regs';}
+/* Fish KEPT today for a species (released fish don't count toward the bag). */
+function keptToday(species){
+  const st=new Date();st.setHours(0,0,0,0);
+  return catches.filter(c=>c.kind!=='blank'&&!c.released&&c.species===species&&new Date(c.caught_at)>=st)
+                .reduce((a,c)=>a+(c.count||1),0);
+}
 
 const STRUCTURES=[
   {k:'flat',label:'Grass flat',ic:'sprout'},{k:'oyster',label:'Oyster bar',ic:'shell'},
@@ -1377,6 +1486,41 @@ document.querySelectorAll('#depthCtl button').forEach(b=>b.onclick=()=>{
 
 /* ---- Suggested spots: derive candidates from mapped habitat, score, rank ---- */
 let suggestMarkers=[];
+/* Scan a coarse DEM grid over the visible bounds and flag submerged structure:
+   holes, bars and drop-offs (>=1.5 ft of local relief — meaningful in shallow bays).
+   Shorelines are excluded by requiring the whole 3x3 neighbourhood to be underwater. */
+async function structureCandidates(b){
+  const S=b.getSouth(),N=b.getNorth(),W=b.getWest(),E=b.getEast();
+  const cLat=(S+N)/2;
+  const widthM=(E-W)*111320*Math.cos(cLat*Math.PI/180);
+  const n=Math.max(12,Math.min(24,Math.round(widthM/400)));   // ~400 m spacing, capped
+  if(n<3)return [];
+  const pts=[];
+  for(let j=0;j<n;j++)for(let i=0;i<n;i++)
+    pts.push([W+(E-W)*i/(n-1), S+(N-S)*j/(n-1)]);
+  const elevs=await sampleDEM(pts);
+  if(!elevs||elevs.length!==pts.length)return [];
+  const hits=[];
+  for(let j=1;j<n-1;j++)for(let i=1;i<n-1;i++){
+    const c=elevs[j*n+i]; if(c==null)continue;
+    const vs=[];
+    for(let dj=-1;dj<=1;dj++)for(let di=-1;di<=1;di++){const v=elevs[(j+dj)*n+(i+di)];if(v!=null)vs.push(v);}
+    if(vs.length<6)continue;
+    const mn=Math.min(...vs),mx=Math.max(...vs);
+    if(mx>=1.0)continue;                       // any of it above water -> shoreline, skip
+    const reliefFt=(mx-mn)/FT;
+    if(reliefFt<1.5)continue;
+    const rng=(mx-mn)||1e-4, rel=(c-mn)/rng;
+    const feature=rel<0.28?'hole':rel>0.72?'bar':'edge';
+    hits.push({relief:reliefFt,lng:W+(E-W)*i/(n-1),lat:S+(N-S)*j/(n-1),feature});
+  }
+  hits.sort((a,b2)=>b2.relief-a.relief);
+  return hits.slice(0,18).map(h=>({
+    lat:h.lat,lng:h.lng,mult:1,prio:2,
+    structure:h.feature==='hole'?'pothole':h.feature==='bar'?'point':'channel',
+    why:h.feature==='hole'?'Bathymetry: hole / pool':h.feature==='bar'?'Bathymetry: bar / hump':'Bathymetry: drop-off / break'
+  }));
+}
 async function suggestSpots(){
   const btn=document.getElementById('btnFind');
   if(suggestMarkers.length){clearSuggest();btn.classList.remove('on');return;}
@@ -1393,16 +1537,31 @@ async function suggestSpots(){
   const cands=[];
   for(const res of oys)for(const f of (res?.features||[])){const ct=centroid(f);if(ct)cands.push({lat:ct[1],lng:ct[0],structure:'oyster',mult:1.10,why:'On a mapped oyster reef'});}
   for(const res of grs)for(const f of (res?.features||[])){const ct=centroid(f);if(ct){const den=grassDensity(f);cands.push({lat:ct[1],lng:ct[0],structure:'flat',mult:den==='continuous'?1.12:1.06,why:den==='continuous'?'On a continuous grass flat':'On a grass flat'});}}
-  // grid-dedupe (~450m), prefer oyster, and skip anything near a saved spot
+  // Bathymetry as its OWN candidate source: scan the DEM across the view and flag
+  // real submerged structure (holes / bars / drop-offs). Habitat alone can never
+  // suggest a hole in open sand — this can.
+  try{ cands.push(...await structureCandidates(b)); }catch(e){ console.warn('bathy',e); }
+  // grid-dedupe (~450m); priority oyster(3) > structure(2) > grass(1); skip saved spots
   const grid={},cell=0.0045;
-  for(const cd of cands){const k=Math.round(cd.lat/cell)+','+Math.round(cd.lng/cell);if(!grid[k]||(cd.structure==='oyster'&&grid[k].structure!=='oyster'))grid[k]=cd;}
+  const prio=cd=>cd.prio||(cd.structure==='oyster'?3:1);
+  for(const cd of cands){const k=Math.round(cd.lat/cell)+','+Math.round(cd.lng/cell);if(!grid[k]||prio(cd)>prio(grid[k]))grid[k]=cd;}
   let list=Object.values(grid).filter(cd=>!spots.some(s=>hav(s.lat,s.lng,cd.lat,cd.lng)<0.25));
-  list=list.slice(0,24);   // cap before DEM sampling (one multipoint request)
+  list=list.slice(0,30);   // cap before DEM sampling (one multipoint request)
   list.forEach((cd,i)=>{cd.id='sg'+i;cd.species=defSpecies;habCache[cd.id]={mult:cd.mult};});
   await applyStructureBatch(list,enc.dredged);
   list.forEach(cd=>{cd.score=scoreAt(cd,ctx,new Date()).score;});
   list.sort((a,b)=>b.score-a.score);
-  const top=list.slice(0,14);
+  let top=list.slice(0,14);
+  // Guarantee bottom-structure representation: in a grass-heavy bay, habitat spots
+  // out-score holes/drop-offs and would crowd them out entirely.
+  const isB=cd=>/^Bathymetry/.test(cd.why||'');
+  const allB=list.filter(isB), want=Math.min(4,allB.length);
+  let have=top.filter(isB).length;
+  for(const b2 of allB){ if(have>=want)break; if(top.includes(b2))continue;
+    for(let i=top.length-1;i>=0;i--){ if(!isB(top[i])){ top.splice(i,1);break; } }
+    top.push(b2);have++;
+  }
+  top.sort((a,b)=>b.score-a.score);
   clearSuggest();
   top.forEach(cd=>{const m=L.marker([cd.lat,cd.lng],{icon:suggestIcon(cd.score,cd.structure),zIndexOffset:-50}).addTo(map).on('click',()=>openSuggest(cd,ctx));suggestMarkers.push(m);});
   toast(top.length?`Found ${top.length} spots — tap a circle`:'No mapped habitat in view to suggest from');
@@ -1759,11 +1918,19 @@ function authBar(){
       <div style="font-weight:700;font-size:13px">${signedIn?esc(who):'Account'}</div>
       <div class="muted" style="font-size:11.5px">${esc(sub)}</div>
     </div>
-    <button class="btn sm ghost" id="authBtn">${signedIn?'Sign out':'Sign in'}</button></div>`;
+    <button class="btn sm ghost" id="authBtn">${signedIn?'Sign out':'Sign in'}</button></div>`
+  +(signedIn?`<div class="row" style="gap:8px;margin-top:8px">
+      ${logOwner?'':'<button class="btn sm ghost" id="claimBtn" style="flex:1">Make private</button>'}
+      <button class="btn sm ghost" id="inviteBtn" style="flex:1">Invite a buddy</button>
+      <button class="btn sm ghost" id="joinBtn" style="flex:1">Join a log</button>
+    </div>`:'');
 }
 function wireAuth(){
   const b=document.getElementById('authBtn');
   if(b)b.onclick=()=>authUser?signOutAuth():signInApple();
+  const c=document.getElementById('claimBtn'); if(c)c.onclick=claimMyData;
+  const i=document.getElementById('inviteBtn'); if(i)i.onclick=createInvite;
+  const j=document.getElementById('joinBtn'); if(j)j.onclick=redeemInvite;
 }
 async function changeSync(){
   const c=prompt('Sync code — enter the same code on each device to share spots & catches:',syncCode);
@@ -1780,6 +1947,12 @@ function openSettings(){
   document.getElementById('setVer').textContent=APP_VERSION;
   document.getElementById('setSync').textContent=syncCode;
   document.getElementById('setUpd').textContent='';
+  const ss=document.getElementById('setState');
+  if(ss&&!ss.options.length){
+    Object.entries(STATES).forEach(([k,v])=>{const o=document.createElement('option');o.value=k;o.textContent=v.name;ss.appendChild(o);});
+  }
+  if(ss)ss.value=homeState;
+  document.getElementById('fishOut').innerHTML='';
   document.getElementById('setOcean').textContent=sstEnabled?'On':'Off';
   document.getElementById('setDaily').textContent=tcEnabled?'On':'Off';
   fetchOceanLatest().then(()=>{const e=document.getElementById('setOceanDate');if(e)e.textContent=oceanDate?('Latest SST image: '+oceanDate):'';});
@@ -2155,7 +2328,9 @@ function openLog(o){
   document.getElementById('logNotes').value=ed&&ed.notes?ed.notes:'';
   document.getElementById('lureOut').textContent='';
   const sp=document.getElementById('logSpecies');sp.innerHTML='';
-  SPECIES.forEach(s=>{const el=document.createElement('button');el.className='pick'+(lc.species===s?' on':'');el.textContent=s;el.onclick=()=>{sp.querySelectorAll('.pick').forEach(p=>p.classList.remove('on'));el.classList.add('on');logState.species=s;};sp.appendChild(el);});
+  SPECIES.forEach(s=>{const el=document.createElement('button');el.className='pick'+(lc.species===s?' on':'');el.textContent=s;el.onclick=()=>{sp.querySelectorAll('.pick').forEach(p=>p.classList.remove('on'));el.classList.add('on');logState.species=s;renderLogReg();};sp.appendChild(el);});
+  logState.released=ed?!!ed.released:false;
+  renderKeptRel();renderLogReg();
   document.getElementById('logBlank').style.display=ed?'none':'';
   document.getElementById('logSave').textContent=ed?'Save changes':'Save catch';
   document.getElementById('logDelete').style.display=ed?'':'none';
@@ -2253,18 +2428,41 @@ async function saveLog(kind){
   let cond={};try{cond=await snapshotAt(lc.lat,lc.lng,lc.structure,lc.species?[lc.species]:[],lc.spotId||undefined,when);}catch(e){}
   if(lc.editId){
     const idx=catches.findIndex(x=>x.id===lc.editId), ex=catches[idx]||{};
-    const cat={...ex,kind:eff,spot_id:lc.spotId,spot_name:lc.spotName,lat:lc.lat,lng:lc.lng,species:lc.species||ex.species||'(target unspecified)',count:eff==='catch'?lc.count:0,length_in:len,bait,notes,structure:lc.structure,conditions:cond,caught_at:when.toISOString()};
+    const cat={...ex,kind:eff,spot_id:lc.spotId,spot_name:lc.spotName,lat:lc.lat,lng:lc.lng,species:lc.species||ex.species||'(target unspecified)',count:eff==='catch'?lc.count:0,length_in:len,bait,notes,structure:lc.structure,conditions:cond,caught_at:when.toISOString(),released:eff==='blank'?true:!!lc.released};
     if(idx>=0)catches[idx]=cat; else catches.unshift(cat);
     saveCatches();pushCatch(cat);
     document.getElementById('logBg').classList.remove('open');toast('Catch updated');
   }else{
-    const cat={id:uid(),kind:eff,spot_id:lc.spotId,spot_name:lc.spotName,lat:lc.lat,lng:lc.lng,species:lc.species||'(target unspecified)',count:eff==='catch'?lc.count:0,length_in:len,bait,notes,structure:lc.structure,conditions:cond,caught_at:when.toISOString()};
+    const cat={id:uid(),kind:eff,spot_id:lc.spotId,spot_name:lc.spotName,lat:lc.lat,lng:lc.lng,species:lc.species||'(target unspecified)',count:eff==='catch'?lc.count:0,length_in:len,bait,notes,structure:lc.structure,conditions:cond,caught_at:when.toISOString(),released:eff==='blank'?true:!!lc.released};
     catches.unshift(cat);saveCatches();pushCatch(cat);
     document.getElementById('logBg').classList.remove('open');toast(eff==='catch'?'Catch logged':'Slow session logged');
   }
   calibrateWeights();scoreAllSpots().then(()=>renderSpots());renderCatches();
   save.disabled=blank.disabled=false;save.textContent='Save catch';blank.innerHTML=ic('ban',15)+'No fish — log this slow session';logState=null;
 }
+/* Kept vs released — released fish don't count toward the daily bag. */
+function renderKeptRel(){
+  const k=document.getElementById('logKept'),r=document.getElementById('logRel');
+  const rel=!!(logState&&logState.released);
+  k.classList.toggle('on',!rel);r.classList.toggle('on',rel);
+  k.style.borderColor=rel?'':'var(--teal)';r.style.borderColor=rel?'var(--teal)':'';
+}
+/* Live limit + running bag for the selected species. */
+function renderLogReg(){
+  const el=document.getElementById('logReg');if(!el)return;
+  const sp=logState&&logState.species;
+  const r=sp?regMatch(sp):null;
+  if(!r){el.innerHTML='';return;}
+  const kept=keptToday(sp), lim=r[3];
+  const over=lim!=null&&kept>=lim;
+  el.innerHTML=`<b>${esc(STATES[homeState].name)}</b>: ${esc(lenText(r))} · ${esc(bagText(r))}`
+    +(lim!=null?` · kept today <b style="color:${over?'#ef4444':'inherit'}">${kept}/${lim}</b>`:'')
+    +(over?' <b style="color:#ef4444">— at the daily limit</b>':'')
+    +(r[4]?`<br><span style="opacity:.8">${esc(r[4])}</span>`:'')
+    +`<br><span style="opacity:.7">${esc(REG_DISCLAIMER)}</span>`;
+}
+document.getElementById('logKept').onclick=()=>{if(logState){logState.released=false;renderKeptRel();}};
+document.getElementById('logRel').onclick=()=>{if(logState){logState.released=true;renderKeptRel();}};
 document.getElementById('logSave').onclick=()=>saveLog('catch');
 document.getElementById('logBlank').onclick=()=>saveLog('blank');
 document.getElementById('logDelete').onclick=()=>{
@@ -2301,6 +2499,57 @@ document.getElementById('lureImg').onchange=async(e)=>{
         if(label)document.getElementById('logBait').value=label;
         out.innerHTML='✓ '+esc(label||'(unclear)')+(p.brand?' · '+esc(p.brand):'')+(p.confidence!=null?` <span class="muted">${Math.round(p.confidence*100)}%</span>`:'');
       }else{const tx=(r.text||'').slice(0,60);if(tx)document.getElementById('logBait').value=tx;out.textContent=tx||'No reading';}
+    }
+  }catch(err){out.textContent='Vision failed: '+(err.message||'');}
+  btn.disabled=false;e.target.value='';
+};
+
+/* ---- Regulations: state picker + limits sheet ---- */
+document.getElementById('setState').onchange=e=>{setHomeState(e.target.value);toast(STATES[homeState].name+' limits');renderLogReg();renderCatches();};
+document.getElementById('setRegs').onclick=()=>showRegs();
+function showRegs(){
+  const el=document.getElementById('regsOut'),btn=document.getElementById('setRegs');
+  if(el.style.display!=='none'){el.style.display='none';btn.textContent='View';return;}
+  const st=STATES[homeState],rows=regsFor();
+  const body=rows.map(r=>`<div style="padding:9px 0;border-top:1px solid var(--line)">
+      <div style="font-weight:700">${esc(r[0])}</div>
+      <div class="muted" style="font-size:13px;margin-top:2px">${esc(lenText(r))} · ${esc(bagText(r))}</div>
+      ${r[4]?`<div class="muted" style="font-size:12px;margin-top:2px;opacity:.85">${esc(r[4])}</div>`:''}
+    </div>`).join('');
+  el.innerHTML=`<div style="color:#f59e0b;font-size:12.5px;margin-bottom:8px">${esc(REG_DISCLAIMER)}</div>`
+    +`<a href="${esc(st.url)}" target="_blank" rel="noopener" style="color:var(--teal);font-size:13px">Open official ${esc(st.agency)} regulations ↗</a>`
+    +body
+    +`<div class="muted" style="font-size:11.5px;margin-top:9px">Last reviewed ${REG_REVIEWED}. Total length in inches. Slot = keep only within the range.</div>`;
+  el.style.display='';btn.textContent='Hide';
+}
+
+/* ---- Fish recognition: photo → fish-vision → species + your state's limits ---- */
+const FISH_URL=SB_URL+'/functions/v1/fish-vision';
+document.getElementById('setFishId').onclick=()=>document.getElementById('fishImg').click();
+document.getElementById('fishImg').onchange=async(e)=>{
+  const file=e.target.files&&e.target.files[0]; if(!file)return;
+  const out=document.getElementById('fishOut'),btn=document.getElementById('setFishId');
+  btn.disabled=true;out.textContent='Identifying…';
+  try{
+    const b64=await downscaleToBase64(file,768,0.8);
+    const r=await fetch(FISH_URL,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+SB_ANON,'apikey':SB_ANON},
+      body:JSON.stringify({image:b64})}).then(r=>r.json());
+    if(r.error){out.textContent='Couldn’t read it ('+esc(String(r.error)).slice(0,40)+')';}
+    else{
+      const p=parseLure(r.text); // same lenient {...} extractor
+      const sp=p&&p.species;
+      if(!sp){out.textContent=(p&&p.notes)||'No fish recognized — try a clearer, closer photo.';}
+      else{
+        const reg=regMatch(sp);
+        out.innerHTML=`<div style="font-weight:800">${esc(sp)}</div>`
+          +(p.confidence!=null?`<div class="muted" style="font-size:12px">confidence ${Math.round(p.confidence*100)}%${p.notes?' · '+esc(p.notes):''}</div>`:'')
+          +(reg
+            ? `<div style="margin-top:7px"><b>${esc(STATES[homeState].name)}</b>: ${esc(lenText(reg))} · ${esc(bagText(reg))}`
+              +(reg[3]!=null?` · kept today ${keptToday(reg[0])}/${reg[3]}`:'')
+              +(reg[4]?`<div class="muted" style="font-size:12px">${esc(reg[4])}</div>`:'')
+              +`<div style="color:#f59e0b;font-size:11.5px;margin-top:4px">${esc(REG_DISCLAIMER)}</div></div>`
+            : `<div class="muted" style="font-size:12px;margin-top:6px">No ${esc(STATES[homeState].name)} limit on file for this species — check the full regs.</div>`);
+      }
     }
   }catch(err){out.textContent='Vision failed: '+(err.message||'');}
   btn.disabled=false;e.target.value='';
