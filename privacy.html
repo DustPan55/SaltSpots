@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>inshoreIQ — Privacy Policy</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { max-width: 720px; margin: 2rem auto; padding: 0 1.25rem;
+         font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  h1 { font-size: 1.6rem; margin-bottom: .25rem; }
+  h2 { font-size: 1.15rem; margin-top: 2.2rem; }
+  code { background: rgba(127,127,127,.18); padding: .1em .35em; border-radius: 4px; }
+  .muted { opacity: .7; font-size: .9rem; }
+  .key { border-left: 3px solid #14b8a6; padding: .1rem 0 .1rem 1rem; margin: 1.25rem 0; }
+  ul { padding-left: 1.15rem; }
+</style>
+</head>
+<body>
+<h1>inshoreIQ Privacy Policy</h1>
+<p class="muted">Last updated: July 12, 2026</p>
+
+<p>inshoreIQ helps saltwater anglers score fishing spots and log catches. This policy explains
+exactly what the app stores, what it sends where, and what is never shared. Your spots are the
+whole point, so we are specific about them.</p>
+
+<div class="key">
+<p><strong>The short version.</strong> Your spots and catches are yours. They are never sold, never
+pooled, and never shared with another user unless you deliberately send that person an invite.
+There are no ads, no analytics SDKs, and no cross-app tracking.</p>
+</div>
+
+<h2>Using the app without an account</h2>
+<p>You can use inshoreIQ without signing in. In that mode your data is tied to a random
+<em>sync code</em> (for example <code>POC-AB12C</code>), not to your name, email, or device. Anyone who
+enters that same code can read that log. That is how sync between your own devices works, and it
+means the code is a shared secret you should treat like a password.</p>
+
+<h2>Signing in (optional)</h2>
+<p>If you choose <strong>Sign in with Apple</strong>, we receive:</p>
+<ul>
+  <li>A <strong>user ID</strong> from Apple, used to mark your spots and catches as yours.</li>
+  <li>An <strong>email address</strong>. If you choose "Hide My Email", Apple gives us a private relay
+      address instead of your real one, and that is all we ever see.</li>
+</ul>
+<p>We do not receive your name, contacts, or anything else from your Apple account.</p>
+<p>Signing in lets you <strong>claim</strong> your data. Once claimed, the database itself enforces that only
+your account can read those rows. Not a setting we could flip: a rule the database applies to every
+request. No other user of inshoreIQ can read your claimed spots.</p>
+
+<h2>Sharing with a buddy</h2>
+<p>If you want someone else to see your log, you create an <strong>invite</strong> and send it to them. They
+can then read the log and add their own catches to it. You can <strong>revoke</strong> the invite at any time,
+and their access ends immediately. Nothing is shared unless you take that action.</p>
+
+<h2>What the app stores</h2>
+<ul>
+  <li><strong>Spots</strong> you create: name, coordinates, structure type, target species, your notes.</li>
+  <li><strong>Catch log</strong>: species, count, length, bait, whether you kept or released it, your notes,
+      and a snapshot of the conditions (tide, wind, pressure, water temperature, moon) at that time.</li>
+  <li><strong>Settings</strong>: your sync code, home state, and on-water hours.</li>
+  <li><strong>Account</strong>: the Apple user ID and email described above, only if you sign in.</li>
+</ul>
+<p>This is stored on our backend, which runs on Supabase.</p>
+
+<h2>Location</h2>
+<p>Location is used only while you are using the app, to score spots near you, center the map, and
+set coordinates for spots you save. You can decline it and the app falls back to a default region.
+Your location is not tracked in the background and is not sold or shared.</p>
+
+<h2>Photos</h2>
+<p>If you photograph a <strong>fish</strong> or a <strong>lure</strong> to identify it, that single image is sent to our backend
+and on to an AI vision model to name the species or the lure. Photos are used for that request and
+are not retained by us, not attached to your account, and not used to train anything. The app never
+reads your photo library on its own: you choose the image, or you take it in the moment.</p>
+
+<h2>The AI features</h2>
+<p>The trip planner and pattern finder send your <strong>own log</strong> (spots, catches, conditions) to an AI
+model so it can answer questions about your fishing. This happens only when you tap one of those
+buttons. The data is used to produce your answer and is not used to train models or shared with
+other users.</p>
+
+<h2>Third-party data providers</h2>
+<p>To produce forecasts and scores the app sends <strong>coordinates only</strong>, never your identity, to public
+data services: NOAA (tides, water level, water temperature), Open-Meteo (weather, marine, sea
+surface temperature), USGS (river flow), and Esri, NOAA and state agency map services (bathymetry,
+habitat, navigation channels). None of these receive your name, email, account, or catch log.</p>
+
+<h2>What we do not do</h2>
+<ul>
+  <li>We do not sell your data, to anyone, ever.</li>
+  <li>We do not pool your spot locations into any shared or "community" map.</li>
+  <li>We do not use advertising identifiers, ad networks, or cross-app tracking.</li>
+  <li>We do not run third-party analytics or crash-tracking SDKs.</li>
+</ul>
+<p>If a future version ever offers an opt-in community feature, it would share only anonymized,
+<strong>location-stripped</strong> condition-to-outcome records (for example: falling tide with a north wind
+produced fish), with no coordinates, spot names, or identity, and only if you switch it on.</p>
+
+<h2>Deleting your data</h2>
+<ul>
+  <li><strong>Individual spots and catches</strong>: delete them in the app at any time.</li>
+  <li><strong>Your whole account</strong>: Settings, then Account, then <strong>Delete account</strong>. This permanently
+      deletes your account and every spot and catch you own. It cannot be undone.</li>
+  <li><strong>No account</strong>: contact us with your sync code and we will delete every row under it.</li>
+</ul>
+
+<h2>Children</h2>
+<p>inshoreIQ is not directed to children under 13 and does not knowingly collect their data.</p>
+
+<h2>Changes</h2>
+<p>If this policy changes materially we will update this page and the date at the top.</p>
+
+<h2>Contact</h2>
+<p>Questions or deletion requests:
+<a href="mailto:bwangerin55@gmail.com">bwangerin55@gmail.com</a>.</p>
+</body>
+</html>
