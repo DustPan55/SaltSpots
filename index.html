@@ -438,7 +438,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v48';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v49';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -466,7 +466,7 @@ async function initAuth(){
   try{
     const {data}=await sb.auth.getSession();
     authUser=data?.session?.user||null;
-    sb.auth.onAuthStateChange((_e,s)=>{authUser=s?.user||null;renderSpots();});
+    sb.auth.onAuthStateChange((_e,s)=>{authUser=s?.user||null;renderSpots();if(authUser)handleInviteLink();});
   }catch(e){console.warn('auth',e);}
 }
 async function signInApple(){
@@ -506,9 +506,9 @@ async function createInvite(){
   try{await navigator.clipboard.writeText(token);toast('Invite code copied');}catch(e){toast('Invite created');}
   prompt('Send this invite code to your buddy:',token);
 }
-async function redeemInvite(){
+async function redeemInvite(tok){
   if(!authUser)return toast('Sign in first');
-  const t=prompt('Paste the invite code you were sent:');
+  const t=tok||prompt('Paste the invite code you were sent:');
   if(!t||!t.trim())return;
   const {data,error}=await sb.rpc('redeem_share',{token:t.trim()});
   if(error)return toast('Invite invalid or already used');
@@ -518,6 +518,23 @@ async function redeemInvite(){
   toast('Joined the shared log');
   const [c1,c2]=await Promise.all([pullSpots(),pullCatches()]);
   spots=c1||[];catches=c2||[];save();saveCatches();refreshMarkers();renderSpots();renderCatches();scoreAllSpots().then(()=>renderSpots());
+}
+/* An invite arrives as ?invite=TOKEN — the buddy taps a link instead of copying a
+   code out of an iMessage (which iOS won't let you partially select). If they're not
+   signed in yet, hold the token until they are, then redeem automatically. */
+const PENDING_INVITE='saltspots.pendingInvite';
+async function handleInviteLink(){
+  const fromURL=new URLSearchParams(location.search).get('invite');
+  const token=(fromURL||localStorage.getItem(PENDING_INVITE)||'').trim();
+  if(!token)return;
+  if(fromURL)history.replaceState({},'',location.pathname);  // don't re-fire on reload
+  if(!authUser){
+    localStorage.setItem(PENDING_INVITE,token);
+    toast('Sign in to accept the invite');
+    return;
+  }
+  localStorage.removeItem(PENDING_INVITE);
+  await redeemInvite(token);
 }
 
 function rowToSpot(r){return {id:r.id,name:r.name,structure:r.structure||'',species:Array.isArray(r.species)?r.species:[],notes:r.notes||'',lat:r.lat,lng:r.lng,created:r.created_at?new Date(r.created_at).getTime():Date.now()};}
@@ -2623,6 +2640,7 @@ sizeMap();window.addEventListener('resize',sizeMap);window.addEventListener('loa
 async function boot(lat,lng,label){
   loadHeader(lat,lng,label);
   await initAuth();   // before the pulls, so a signed-in session is attached to them
+  await handleInviteLink();   // ?invite=TOKEN → join the shared log
   const [cloud,cloudC]=await Promise.all([pullSpots().catch(()=>null),pullCatches().catch(()=>null)]); // localStorage already painted
   if(cloud){spots=cloud;save();refreshMarkers();}
   if(cloudC){catches=cloudC;saveCatches();}
