@@ -438,7 +438,7 @@
 <script>
 /* ============================ STATE ============================ */
 const LS='saltspots.v1';
-const APP_VERSION='v49';  // bump together with the sw.js cache name on each deploy
+const APP_VERSION='v50';  // bump together with the sw.js cache name on each deploy
 let spots = load();
 let map, markers={}, pendingLatLng=null, editingId=null, userLoc=null;
 let habLayers={oyster:null,grass:null,depth:null};
@@ -466,8 +466,33 @@ async function initAuth(){
   try{
     const {data}=await sb.auth.getSession();
     authUser=data?.session?.user||null;
-    sb.auth.onAuthStateChange((_e,s)=>{authUser=s?.user||null;renderSpots();if(authUser)handleInviteLink();});
+    await adoptOwnedLog();
+    sb.auth.onAuthStateChange(async (_e,s)=>{
+      authUser=s?.user||null;
+      if(authUser){ await adoptOwnedLog(); await reloadAll(); handleInviteLink(); }
+      renderSpots();
+    });
   }catch(e){console.warn('auth',e);}
+}
+
+/* Your account already owns rows, and those rows already live under a log. Find it,
+   so signing in on a fresh browser shows your spots with nothing to type. */
+async function adoptOwnedLog(){
+  if(!authUser)return;
+  const {data}=await sb.from('salt_spots').select('sync_code')
+    .eq('user_id',authUser.id).limit(1);
+  const code=data && data[0] && data[0].sync_code;
+  if(code && code!==syncCode){
+    syncCode=code; localStorage.setItem('saltspots.sync',syncCode);
+    const sv=document.getElementById('setSync'); if(sv)sv.textContent=syncCode;
+  }
+}
+
+async function reloadAll(){
+  const [a,b]=await Promise.all([pullSpots().catch(()=>null),pullCatches().catch(()=>null)]);
+  if(a){spots=a;save();refreshMarkers();}
+  if(b){catches=b;saveCatches();}
+  renderSpots();renderCatches();scoreAllSpots().then(()=>renderSpots());
 }
 async function signInApple(){
   if(!sb)return;
@@ -538,9 +563,25 @@ async function handleInviteLink(){
 }
 
 function rowToSpot(r){return {id:r.id,name:r.name,structure:r.structure||'',species:Array.isArray(r.species)?r.species:[],notes:r.notes||'',lat:r.lat,lng:r.lng,created:r.created_at?new Date(r.created_at).getTime():Date.now()};}
+/* Signed in, your Apple ID IS the identity: ask the database for the rows you OWN,
+   not for a sync code you had to remember. Sign in on any device — phone, this
+   browser — and your data is simply there. The code only matters when signed out. */
+function logFilter(q){
+  if(authUser && !sharedOwner){
+    // Mine: everything I own, plus rows still unclaimed under this code.
+    return q.or(`user_id.eq.${authUser.id},and(sync_code.eq.${syncCode},user_id.is.null)`);
+  }
+  if(authUser && sharedOwner){
+    return q.eq('sync_code',syncCode).eq('user_id',sharedOwner);  // a buddy's log
+  }
+  return q.eq('sync_code',syncCode);                               // signed out
+}
+let sharedOwner=null;   // set when viewing a log someone shared with you
+
 async function pullSpots(){
   if(!sb)return null;
-  const {data,error}=await sb.from('salt_spots').select('*').eq('sync_code',syncCode).order('created_at',{ascending:true});
+  const {data,error}=await logFilter(sb.from('salt_spots').select('*'))
+    .order('created_at',{ascending:true});
   if(error){console.warn('pull',error.message);return null;}
   logOwner=(data.find(r=>r.user_id)||{}).user_id||null;   // who owns this log, if anyone
   return data.map(rowToSpot);
@@ -560,7 +601,8 @@ function saveCatches(){localStorage.setItem(LSC,JSON.stringify(catches))}
 function catchRow(c){return {id:c.id,sync_code:syncCode,kind:c.kind||'catch',spot_id:c.spot_id,spot_name:c.spot_name,lat:c.lat,lng:c.lng,species:c.species,count:c.count,length_in:c.length_in,bait:c.bait,notes:c.notes,structure:c.structure,conditions:c.conditions,caught_at:c.caught_at,released:!!c.released,user_id:ownerStamp()};}
 async function pullCatches(){
   if(!sb)return null;
-  const {data,error}=await sb.from('salt_catches').select('*').eq('sync_code',syncCode).order('caught_at',{ascending:false});
+  const {data,error}=await logFilter(sb.from('salt_catches').select('*'))
+    .order('caught_at',{ascending:false});
   if(error){console.warn('pullC',error.message);return null;}
   return data.map(r=>({id:r.id,kind:r.kind||'catch',spot_id:r.spot_id,spot_name:r.spot_name,lat:r.lat,lng:r.lng,species:r.species,count:r.count,length_in:r.length_in,bait:r.bait,notes:r.notes,structure:r.structure,conditions:r.conditions||{},caught_at:r.caught_at,released:!!r.released}));
 }
