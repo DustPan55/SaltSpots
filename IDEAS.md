@@ -1,4 +1,4 @@
-# InshoreIQ — Feature Ideas
+# BayHawk — Feature Ideas
 
 Running list of feature ideas to build into the native iOS app. Captured from the VM so they can be pulled on the Mac. Each entry has the concept, user flow, technical notes (screens / data / edge functions), and open questions.
 
